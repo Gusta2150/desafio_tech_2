@@ -19,6 +19,7 @@ import logging
 
 import joblib
 
+from src.config import load_env
 from src.data import PROJECT_DIR, load_split
 from src.llm import DiagnosisInterpreter, get_provider
 
@@ -31,6 +32,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--provider", default=None)
     args = ap.parse_args()
+    load_env()
     logging.basicConfig(level=logging.WARNING)
 
     model = joblib.load(PROJECT_DIR / "models" / "best_model.joblib")
@@ -58,6 +60,9 @@ def main() -> None:
     out = interp.explain_case(mal)
     print(out.text)
     print(f"\n[provedor={out.provider} modelo={out.model} latência={out.latency_s}s fallback={out.used_fallback}]")
+    if out.used_fallback:
+        print(f"ATENÇÃO: a LLM ({interp.provider.name}) falhou e a resposta acima veio do template offline.\n"
+              f"Motivo: {out.error}")
 
     title("4. Pergunta livre")
     q = "Quais medidas mais contribuíram para esse resultado e o que devo considerar antes de pedir biópsia?"

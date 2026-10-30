@@ -14,17 +14,32 @@ Configuração por variáveis de ambiente (ver ``.env.example``)::
     LLM_MODEL=llama-3.3-70b-versatile
     LLM_BASE_URL=https://api.groq.com/openai/v1
     LLM_API_KEY=...
+    LLM_MAX_RETRIES=5      # novas tentativas em limite de taxa (429) e erros temporários
+
+Limite de taxa: o plano gratuito do Groq limita tokens e requisições por minuto.
+Quando a API responde 429 (ou 5xx, ou dá timeout), a chamada espera o tempo
+indicado no cabeçalho ``Retry-After`` (ou um recuo exponencial) e tenta de novo.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
+
+logger = logging.getLogger(__name__)
+
+RETRY_STATUS = {408, 409, 429, 500, 502, 503, 504}
+MAX_WAIT_S = 60.0
+
+# Substituível nos testes para não esperar de verdade.
+_sleep = time.sleep
 
 
 @dataclass
@@ -48,6 +63,62 @@ class LLMError(RuntimeError):
     pass
 
 
+class LLMAPIError(LLMError):
+    """Falha de comunicação com a API (rede, autenticação, limite de taxa esgotado).
+
+    Separada de ``LLMError`` para distinguir "a LLM não respondeu" de "a LLM
+    respondeu fora do formato" — só o segundo caso diz algo sobre a qualidade
+    do prompt.
+    """
+
+
+def _max_retries() -> int:
+    try:
+        return max(0, int(os.getenv("LLM_MAX_RETRIES") or 5))
+    except ValueError:
+        return 5
+
+
+def _retry_after(resp: httpx.Response | None, attempt: int) -> float:
+    """Segundos de espera: ``Retry-After`` da API ou recuo exponencial com jitter."""
+    if resp is not None:
+        header = resp.headers.get("retry-after")
+        if header:
+            try:
+                return min(MAX_WAIT_S, float(header) + 0.5)
+            except ValueError:
+                pass
+    return min(MAX_WAIT_S, 2.0 ** attempt + random.uniform(0, 1))
+
+
+def post_with_retry(url: str, *, json_body: dict[str, Any], headers: dict[str, str], timeout: float,
+                    label: str) -> httpx.Response:
+    """POST com novas tentativas em 429/5xx/timeout. Erros definitivos (ex.: 401) falham na hora."""
+    retries = _max_retries()
+    for attempt in range(retries + 1):
+        resp: httpx.Response | None = None
+        try:
+            resp = httpx.post(url, json=json_body, headers=headers, timeout=timeout)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            if attempt == retries:
+                raise LLMAPIError(f"Falha ao chamar {label}: {exc}") from exc
+            wait = _retry_after(None, attempt)
+            logger.warning("%s: erro de rede (%s); nova tentativa em %.1fs", label, exc, wait)
+            _sleep(wait)
+            continue
+        if resp.status_code < 400:
+            return resp
+        if resp.status_code in RETRY_STATUS and attempt < retries:
+            wait = _retry_after(resp, attempt)
+            logger.warning("%s: HTTP %d; nova tentativa %d/%d em %.1fs",
+                           label, resp.status_code, attempt + 1, retries, wait)
+            _sleep(wait)
+            continue
+        detail = resp.text[:300].replace("\n", " ")
+        raise LLMAPIError(f"Falha ao chamar {label}: HTTP {resp.status_code} — {detail}")
+    raise LLMAPIError(f"Falha ao chamar {label}: tentativas esgotadas")  # pragma: no cover
+
+
 class OpenAICompatibleProvider:
     name = "openai"
 
@@ -68,15 +139,15 @@ class OpenAICompatibleProvider:
         if json_mode:
             body["response_format"] = {"type": "json_object"}
         start = time.perf_counter()
+        resp = post_with_retry(f"{self.base_url}/chat/completions", json_body=body, timeout=self.timeout,
+                               headers={"Authorization": f"Bearer {self.api_key}"}, label=self.base_url)
         try:
-            resp = httpx.post(f"{self.base_url}/chat/completions", json=body, timeout=self.timeout,
-                              headers={"Authorization": f"Bearer {self.api_key}"})
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise LLMError(f"Falha ao chamar {self.base_url}: {exc}") from exc
-        data = resp.json()
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"]
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise LLMAPIError(f"Resposta inesperada de {self.base_url}: {resp.text[:200]}") from exc
         return LLMResponse(
-            text=data["choices"][0]["message"]["content"], provider=self.name, model=self.model,
+            text=text, provider=self.name, model=self.model,
             latency_s=round(time.perf_counter() - start, 3), usage=data.get("usage", {}),
         )
 
@@ -94,17 +165,16 @@ class AnthropicProvider:
         if json_mode:
             user += "\n\nResponda somente com o objeto JSON, sem texto antes ou depois."
         start = time.perf_counter()
+        resp = post_with_retry(
+            f"{self.base_url}/v1/messages", timeout=self.timeout, label="a API da Anthropic",
+            headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
+            json_body={"model": self.model, "system": system, "max_tokens": max_tokens,
+                       "temperature": temperature, "messages": [{"role": "user", "content": user}]},
+        )
         try:
-            resp = httpx.post(
-                f"{self.base_url}/v1/messages", timeout=self.timeout,
-                headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01"},
-                json={"model": self.model, "system": system, "max_tokens": max_tokens,
-                      "temperature": temperature, "messages": [{"role": "user", "content": user}]},
-            )
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise LLMError(f"Falha ao chamar a API da Anthropic: {exc}") from exc
-        data = resp.json()
+            data = resp.json()
+        except ValueError as exc:
+            raise LLMAPIError(f"Resposta inesperada da API da Anthropic: {resp.text[:200]}") from exc
         text = "".join(block.get("text", "") for block in data.get("content", []))
         return LLMResponse(text=text, provider=self.name, model=self.model,
                            latency_s=round(time.perf_counter() - start, 3), usage=data.get("usage", {}))
@@ -212,15 +282,20 @@ def get_provider(name: str | None = None, model: str | None = None) -> LLMProvid
 
     Aceita os atalhos ``groq``, ``ollama``, ``openai``, ``anthropic`` e ``offline``.
     """
-    name = (name or os.getenv("LLM_PROVIDER", "offline")).lower()
+    # ``or`` em vez do padrão do getenv: no .env as linhas "LLM_MODEL=" vazias
+    # devem valer como "não definido", e não como string vazia.
+    name = (name or os.getenv("LLM_PROVIDER") or "offline").lower()
     if name == "offline":
         return OfflineTemplateProvider()
     if name not in PRESETS:
         raise ValueError(f"Provedor desconhecido: {name}. Use offline, {', '.join(PRESETS)}.")
     kind, default_url, default_model, key_env = PRESETS[name]
-    base_url = os.getenv("LLM_BASE_URL", default_url)
-    model = model or os.getenv("LLM_MODEL", default_model)
+    base_url = os.getenv("LLM_BASE_URL") or default_url
+    model = model or os.getenv("LLM_MODEL") or default_model
     api_key = os.getenv("LLM_API_KEY") or (os.getenv(key_env) if key_env else None)
+    if key_env and not api_key:
+        raise LLMError(f"Chave do provedor '{name}' não encontrada. Defina {key_env} (ou LLM_API_KEY) "
+                       "no arquivo .env ou no ambiente.")
     if kind == "anthropic":
         return AnthropicProvider(model, api_key, base_url)
     provider = OpenAICompatibleProvider(model, base_url, api_key)

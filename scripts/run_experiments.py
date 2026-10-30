@@ -13,6 +13,7 @@ import warnings
 
 from sklearn.exceptions import ConvergenceWarning
 
+from src.config import load_env
 from src.experiments import run_all
 from src.monitoring import setup_logging
 
@@ -23,6 +24,7 @@ def main() -> None:
     parser.add_argument("--experiments", nargs="*", help="nomes definidos em configs/experiments.yaml")
     parser.add_argument("--quick", action="store_true", help="orçamento mínimo (para testes)")
     args = parser.parse_args()
+    load_env()
 
     warnings.filterwarnings("ignore", category=ConvergenceWarning)
     setup_logging(fmt="text")

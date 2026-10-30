@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from src import __version__
 from src.api import metrics as M
+from src.config import load_env
 from src.data import PROJECT_DIR, load_split
 from src.experiments import RESULTS_DIR, bootstrap_baseline_model
 from src.fitness import CVFitness
@@ -33,6 +34,8 @@ from src.llm import DiagnosisInterpreter, LLMError, get_provider
 from src.models import BASELINE_PARAMS, MODEL_NAMES
 from src.monitoring import log_event, request_id_var, setup_logging
 from src.spaces import SPACES
+
+load_env()  # .env da raiz do projeto (não sobrescreve variáveis já definidas)
 
 logger = logging.getLogger("api")
 MODELS_DIR = PROJECT_DIR / "models"

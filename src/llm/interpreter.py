@@ -27,7 +27,7 @@ import pandas as pd
 from src.explain import build_case_context
 from src.llm.prompts import (CASE_FIELDS, PERFORMANCE_FIELDS, PROMPT_VERSION, SYSTEM_CLINICAL,
                              case_prompt, performance_prompt)
-from src.llm.providers import LLMError, LLMProvider, OfflineTemplateProvider
+from src.llm.providers import LLMAPIError, LLMError, LLMProvider, OfflineTemplateProvider
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,9 @@ class Interpretation:
     used_fallback: bool = False
     error: str | None = None
     raw: str = field(default="", repr=False)
+    # "api" = a LLM não respondeu (rede, chave, limite de taxa);
+    # "formato" = respondeu, mas fora do JSON esperado.
+    error_kind: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -116,15 +119,17 @@ class DiagnosisInterpreter:
             return Interpretation(structured, text, context, resp.provider, resp.model, strategy, PROMPT_VERSION,
                                   resp.latency_s, valid, raw=resp.text)
         except LLMError as exc:
-            logger.warning("LLM falhou (%s): %s", self.provider.name, exc)
+            kind = "api" if isinstance(exc, LLMAPIError) else "formato"
+            logger.warning("LLM falhou (%s, %s): %s", self.provider.name, kind, exc)
             if not self.fallback or self.provider.name == "offline":
                 return Interpretation(None, "", context, self.provider.name, self.provider.model, strategy,
-                                      PROMPT_VERSION, round(time.perf_counter() - start, 3), False, error=str(exc))
+                                      PROMPT_VERSION, round(time.perf_counter() - start, 3), False, error=str(exc),
+                                      error_kind=kind)
             resp = self._offline.generate(system, user, json_mode=True, context=context)
             structured = json.loads(resp.text)
             return Interpretation(structured, render_text(structured), context, resp.provider, resp.model,
                                   strategy, PROMPT_VERSION, round(time.perf_counter() - start, 3), True,
-                                  used_fallback=True, error=str(exc), raw=resp.text)
+                                  used_fallback=True, error=str(exc), raw=resp.text, error_kind=kind)
 
     # ------------------------------------------------------------------ #
     def explain_case(self, sample: pd.DataFrame | dict[str, Any], strategy: str | None = None) -> Interpretation:
@@ -152,8 +157,9 @@ class DiagnosisInterpreter:
                                           context=context)
             structured = extract_json(resp.text) or {"resposta": resp.text, "aviso": DISCLAIMER}
         except LLMError as exc:
+            kind = "api" if isinstance(exc, LLMAPIError) else "formato"
             return Interpretation(None, "", context, self.provider.name, self.provider.model, "ask",
-                                  PROMPT_VERSION, 0.0, False, error=str(exc))
+                                  PROMPT_VERSION, 0.0, False, error=str(exc), error_kind=kind)
         if "resumo" in structured and "resposta" not in structured:  # provedor offline
             structured = {"resposta": structured["resumo"], "aviso": structured.get("aviso", DISCLAIMER)}
         structured.setdefault("aviso", DISCLAIMER)

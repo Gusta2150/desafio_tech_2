@@ -8,6 +8,12 @@ Exemplos:
     python -m scripts.evaluate_llm --provider offline            # sem chave (referência)
     python -m scripts.evaluate_llm --provider groq --judge groq  # LLaMA 3.3 70B via Groq
     python -m scripts.evaluate_llm --provider ollama --cases 8   # LLaMA local via Ollama
+
+Se alguma chamada à LLM (ou ao juiz) falhar por erro de API — rede, chave ou
+limite de taxa esgotado mesmo após as novas tentativas —, os resultados vão para
+``reports/results/incompleto/`` e o script termina com erro. Assim o relatório
+nunca mistura respostas reais com falhas de infraestrutura. ``--allow-errors``
+salva no lugar normal mesmo assim.
 """
 
 from __future__ import annotations
@@ -15,11 +21,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from statistics import mean
 
 import joblib
 import numpy as np
 
+from src.config import load_env
 from src.data import PROJECT_DIR, load_split
 from src.llm import DiagnosisInterpreter, get_provider
 from src.llm.evaluation import evaluate_interpretation, llm_judge
@@ -56,7 +64,10 @@ def main() -> None:
     ap.add_argument("--judge", default=None, help="provedor usado como LLM juiz (opcional)")
     ap.add_argument("--cases", type=int, default=10)
     ap.add_argument("--strategies", nargs="*", default=STRATEGIES)
+    ap.add_argument("--allow-errors", action="store_true",
+                    help="salva os resultados no lugar normal mesmo com falhas de API")
     args = ap.parse_args()
+    load_env()
     setup_logging(fmt="text")
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -69,13 +80,18 @@ def main() -> None:
 
     idx = pick_cases(model, data.X_test, data.y_test, args.cases)
     rows, examples = [], []
+    failures = {"api": 0, "formato": 0, "juiz": 0}
     for i in idx:
         sample = data.X_test.iloc[[i]]
         for strategy in args.strategies:
             out = interp.explain_case(sample, strategy=strategy)
+            if out.error_kind:
+                failures[out.error_kind] += 1
             scores = evaluate_interpretation(out)
             if judge:
                 scores["juiz"] = llm_judge(judge, out)
+                if scores["juiz"] is None and judge.name != "offline":
+                    failures["juiz"] += 1
             rows.append({"caso": int(data.X_test.index[i]), "diagnostico_real": int(data.y_test.iloc[i]),
                          "estrategia": strategy, **scores})
             if len(examples) < 6:
@@ -94,18 +110,29 @@ def main() -> None:
             summary[s]["juiz_media"] = round(mean(judged), 2)
 
     perf = interp.explain_performance(json.loads((RESULTS / "experiments.json").read_text(encoding="utf-8")))
+    if perf.error_kind:
+        failures[perf.error_kind] += 1
     result = {
         "provider": provider.name, "model": provider.model, "judge": judge.name if judge else None,
-        "cases": len(idx), "summary": summary, "rows": rows, "examples": examples,
+        "judge_model": judge.model if judge else None,
+        "cases": len(idx), "summary": summary, "falhas": failures, "rows": rows, "examples": examples,
         "performance_report": perf.to_dict(),
     }
-    out_path = RESULTS / f"llm_evaluation_{provider.name}.json"
+    incomplete = provider.name != "offline" and (failures["api"] or failures["juiz"]) and not args.allow_errors
+    out_dir = RESULTS / "incompleto" if incomplete else RESULTS
+    out_path = out_dir / f"llm_evaluation_{provider.name}.json"
     dump_json(result, out_path)
 
     print("\n=== Média por estratégia ===")
     for s, m in summary.items():
         print(f"{s:<12} " + " ".join(f"{k}={v}" for k, v in m.items()))
-    print(f"\nResultados em {out_path}")
+    print(f"\nFalhas: API={failures['api']} formato={failures['formato']} juiz={failures['juiz']}")
+    print(f"Resultados em {out_path}")
+    if incomplete:
+        print("\nATENÇÃO: houve falhas de API (rede, chave ou limite de taxa). Os resultados foram salvos em\n"
+              f"{out_dir} e NÃO entram no relatório. Rode de novo (o plano gratuito do Groq renova o limite\n"
+              "a cada minuto) ou use --allow-errors se quiser aceitar assim mesmo.", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

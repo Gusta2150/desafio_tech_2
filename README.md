@@ -114,6 +114,11 @@ python -m scripts.demo --provider groq                       # demonstração po
 python -m scripts.evaluate_llm --provider groq --judge groq  # avaliação das 3 estratégias de prompt
 ```
 
+- O `.env` é lido automaticamente pelos scripts, pela API e pelo notebook. Variáveis já exportadas no terminal têm prioridade.
+- Sem a chave do provedor escolhido, o erro aparece na hora (antes caía em silêncio no template).
+- Limite de taxa (429) e erros temporários são repetidos até `LLM_MAX_RETRIES` vezes, respeitando o `Retry-After` da API — no plano gratuito do Groq a avaliação completa leva alguns minutos por causa do limite de tokens por minuto.
+- Se mesmo assim alguma chamada falhar, `evaluate_llm` salva em `reports/results/incompleto/` e termina com erro: o relatório nunca mistura respostas reais com falhas de API.
+
 ### 3. Relatório
 
 ```bash
