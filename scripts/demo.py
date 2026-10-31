@@ -1,7 +1,7 @@
 """Demonstração ponta a ponta (útil para o vídeo).
 
     python -m scripts.demo                     # LLM offline (sem chave)
-    python -m scripts.demo --provider groq     # LLaMA 3.3 70B via Groq
+    python -m scripts.demo --provider groq     # GPT-OSS 120B via Groq
     python -m scripts.demo --provider ollama   # LLaMA local
 
 1. Mostra o modelo selecionado e o ganho em relação à Fase 1.
@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 
 import joblib
 
@@ -28,7 +29,20 @@ def title(text: str) -> None:
     print("\n" + "=" * 78 + f"\n{text}\n" + "=" * 78)
 
 
+def show(out, provider: str) -> None:
+    """Imprime a resposta e deixa explícito quando a LLM falhou."""
+    print(out.text)
+    print(f"\n[provedor={out.provider} modelo={out.model} latência={out.latency_s}s fallback={out.used_fallback}]")
+    if out.used_fallback:
+        print(f"ATENÇÃO: a LLM ({provider}) falhou e a resposta acima veio do template offline.\n"
+              f"Motivo: {out.error}")
+    elif out.error:
+        print(f"ATENÇÃO: a LLM ({provider}) falhou e não houve resposta.\nMotivo: {out.error}")
+
+
 def main() -> None:
+    # No Windows, com a saída redirecionada, o padrão é cp1252 e os acentos/setas quebram o print.
+    sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--provider", default=None)
     args = ap.parse_args()
@@ -57,20 +71,15 @@ def main() -> None:
 
     interp = DiagnosisInterpreter(model, card, get_provider(args.provider))
     title(f"3. Explicação para o médico ({interp.provider.name})")
-    out = interp.explain_case(mal)
-    print(out.text)
-    print(f"\n[provedor={out.provider} modelo={out.model} latência={out.latency_s}s fallback={out.used_fallback}]")
-    if out.used_fallback:
-        print(f"ATENÇÃO: a LLM ({interp.provider.name}) falhou e a resposta acima veio do template offline.\n"
-              f"Motivo: {out.error}")
+    show(interp.explain_case(mal), interp.provider.name)
 
     title("4. Pergunta livre")
     q = "Quais medidas mais contribuíram para esse resultado e o que devo considerar antes de pedir biópsia?"
     print(f"P: {q}\n")
-    print(interp.ask(mal, q).text)
+    show(interp.ask(mal, q), interp.provider.name)
 
     title("5. Relatório de desempenho para a equipe clínica")
-    print(interp.explain_performance(results).text)
+    show(interp.explain_performance(results), interp.provider.name)
 
 
 if __name__ == "__main__":

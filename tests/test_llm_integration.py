@@ -94,8 +94,20 @@ def test_empty_env_values_fall_back_to_defaults(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "")       # linhas vazias do .env.example
     monkeypatch.setenv("LLM_BASE_URL", "")
     p = get_provider("groq")
-    assert p.model == "llama-3.3-70b-versatile"
+    assert p.model == "openai/gpt-oss-120b"
     assert p.base_url == URL
+
+
+def test_reasoning_models_use_low_effort(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "chave")
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_REASONING_EFFORT", raising=False)
+    sent = []
+    monkeypatch.setattr(providers.httpx, "post", lambda url, **kw: sent.append(kw["json"]) or _resp(200, OK))
+    get_provider("groq").generate("s", "u")
+    assert sent[0]["reasoning_effort"] == "low"
+    get_provider("groq", model="outro-modelo").generate("s", "u")
+    assert "reasoning_effort" not in sent[1]          # modelos comuns não recebem o parâmetro
 
 
 def test_missing_key_fails_clearly(monkeypatch):

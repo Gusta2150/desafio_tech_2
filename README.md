@@ -103,7 +103,7 @@ Copie `.env.example` para `.env` e escolha um provedor:
 
 | Provedor | Modelo padrão | Como obter |
 |---|---|---|
-| `groq` (recomendado) | LLaMA 3.3 70B | chave gratuita em console.groq.com → `GROQ_API_KEY=...` |
+| `groq` (recomendado) | GPT-OSS 120B (`openai/gpt-oss-120b`) | chave gratuita em console.groq.com → `GROQ_API_KEY=...` |
 | `ollama` | LLaMA 3.1 8B (local) | instale o Ollama e rode `ollama pull llama3.1:8b` |
 | `openai` | GPT-4o mini | `OPENAI_API_KEY=...` |
 | `anthropic` | Claude Haiku | `ANTHROPIC_API_KEY=...` |

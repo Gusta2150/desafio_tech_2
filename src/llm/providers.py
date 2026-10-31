@@ -1,7 +1,7 @@
 """Provedores de LLM.
 
 * ``openai``    — qualquer API compatível com OpenAI Chat Completions:
-                  OpenAI (GPT), Groq (LLaMA 3, gratuito), Ollama local
+                  OpenAI (GPT), Groq (GPT-OSS 120B, gratuito), Ollama local
                   (``http://localhost:11434/v1``), LM Studio, Together, Gemini etc.
 * ``anthropic`` — API Messages da Anthropic (Claude).
 * ``offline``   — gerador determinístico baseado em template. Não é uma LLM:
@@ -11,10 +11,11 @@
 Configuração por variáveis de ambiente (ver ``.env.example``)::
 
     LLM_PROVIDER=openai|anthropic|offline
-    LLM_MODEL=llama-3.3-70b-versatile
+    LLM_MODEL=openai/gpt-oss-120b
     LLM_BASE_URL=https://api.groq.com/openai/v1
     LLM_API_KEY=...
     LLM_MAX_RETRIES=5      # novas tentativas em limite de taxa (429) e erros temporários
+    LLM_REASONING_EFFORT=low  # modelos de raciocínio (gpt-oss); padrão "low" nesses modelos
 
 Limite de taxa: o plano gratuito do Groq limita tokens e requisições por minuto.
 Quando a API responde 429 (ou 5xx, ou dá timeout), a chamada espera o tempo
@@ -123,11 +124,12 @@ class OpenAICompatibleProvider:
     name = "openai"
 
     def __init__(self, model: str, base_url: str = "https://api.openai.com/v1", api_key: str | None = None,
-                 timeout: float = 60.0):
+                 timeout: float = 60.0, reasoning_effort: str | None = None):
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or "ollama"  # Ollama ignora a chave
         self.timeout = timeout
+        self.reasoning_effort = reasoning_effort
 
     def generate(self, system, user, *, temperature=0.2, max_tokens=900, json_mode=False, context=None):
         body: dict[str, Any] = {
@@ -138,6 +140,8 @@ class OpenAICompatibleProvider:
         }
         if json_mode:
             body["response_format"] = {"type": "json_object"}
+        if self.reasoning_effort:
+            body["reasoning_effort"] = self.reasoning_effort
         start = time.perf_counter()
         resp = post_with_retry(f"{self.base_url}/chat/completions", json_body=body, timeout=self.timeout,
                                headers={"Authorization": f"Bearer {self.api_key}"}, label=self.base_url)
@@ -270,7 +274,7 @@ class OfflineTemplateProvider:
 
 
 PRESETS = {
-    "groq": ("openai", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile", "GROQ_API_KEY"),
+    "groq": ("openai", "https://api.groq.com/openai/v1", "openai/gpt-oss-120b", "GROQ_API_KEY"),
     "ollama": ("openai", "http://localhost:11434/v1", "llama3.1:8b", None),
     "openai": ("openai", "https://api.openai.com/v1", "gpt-4o-mini", "OPENAI_API_KEY"),
     "anthropic": ("anthropic", "https://api.anthropic.com", "claude-haiku-4-5", "ANTHROPIC_API_KEY"),
@@ -298,6 +302,9 @@ def get_provider(name: str | None = None, model: str | None = None) -> LLMProvid
                        "no arquivo .env ou no ambiente.")
     if kind == "anthropic":
         return AnthropicProvider(model, api_key, base_url)
-    provider = OpenAICompatibleProvider(model, base_url, api_key)
+    # Modelos de raciocínio (gpt-oss) gastam parte de max_tokens "pensando"; no nível padrão a
+    # resposta às vezes é cortada e o Groq recusa o JSON (HTTP 400 json_validate_failed).
+    effort = os.getenv("LLM_REASONING_EFFORT") or ("low" if "gpt-oss" in model else None)
+    provider = OpenAICompatibleProvider(model, base_url, api_key, reasoning_effort=effort)
     provider.name = name
     return provider

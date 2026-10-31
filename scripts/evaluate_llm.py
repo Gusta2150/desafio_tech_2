@@ -6,7 +6,7 @@ informado, com notas de um "LLM juiz".
 
 Exemplos:
     python -m scripts.evaluate_llm --provider offline            # sem chave (referência)
-    python -m scripts.evaluate_llm --provider groq --judge groq  # LLaMA 3.3 70B via Groq
+    python -m scripts.evaluate_llm --provider groq --judge groq  # GPT-OSS 120B via Groq
     python -m scripts.evaluate_llm --provider ollama --cases 8   # LLaMA local via Ollama
 
 Se alguma chamada à LLM (ou ao juiz) falhar por erro de API — rede, chave ou
