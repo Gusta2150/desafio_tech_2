@@ -1,0 +1,185 @@
+<div class="page">
+  <header class="page__header">
+    <h1>Algoritmo genético</h1>
+    <p>
+      Cada indivíduo é um conjunto de hiperparâmetros (incluindo o limiar de decisão). A fitness combina recall, F1 e
+      ROC-AUC em validação cruzada. Cinco configurações do AG foram comparadas com a busca aleatória no mesmo orçamento.
+    </p>
+  </header>
+
+  <p class="error" *ngIf="error">{{ error }}</p>
+
+  <div class="chip-row" *ngIf="history">
+    <button
+      *ngFor="let m of models"
+      type="button"
+      class="chip"
+      [class.chip--active]="m.key === modelKey"
+      (click)="selectModel(m.key)"
+    >
+      {{ m.label }}
+    </button>
+  </div>
+
+  <section class="card" *ngIf="rows.length">
+    <h2>Experimentos · {{ current?.display_name }}</h2>
+    <div class="table-scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Experimento</th>
+            <th class="num">Fitness CV</th>
+            <th class="num">Recall</th>
+            <th class="num">F1</th>
+            <th class="num">ROC-AUC</th>
+            <th class="num">FN</th>
+            <th class="num">FP</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let r of rows">
+            <td>{{ r.experimento }}</td>
+            <td class="num" [class.best]="r.experimento === bestRowName">{{ r.cv_fitness | number: '1.4-4' }}</td>
+            <td class="num">{{ r.teste_recall | percent: '1.1-1' }}</td>
+            <td class="num">{{ r.teste_f1 | number: '1.3-3' }}</td>
+            <td class="num">{{ r.teste_roc_auc | number: '1.3-3' }}</td>
+            <td class="num">{{ r.teste_false_negatives }}</td>
+            <td class="num">{{ r.teste_false_positives }}</td>
+            <td>
+              <span class="badge badge--best" *ngIf="isSelected(r)">em produção</span>
+              <span class="badge badge--muted" *ngIf="r.experimento === 'baseline'">Fase 1</span>
+              <span class="badge badge--muted" *ngIf="r.experimento === 'random_search'">referência</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="hint">
+      Fitness CV = validação cruzada no treino (o que o AG otimiza). As demais colunas são no conjunto de teste, que o
+      AG nunca viu. O modelo em produção é escolhido por uma validação repetida mais robusta, não só pela maior fitness.
+    </p>
+  </section>
+
+  <section class="card" *ngIf="current">
+    <h2>Convergência × busca aleatória</h2>
+    <div class="chart-box">
+      <canvas baseChart [data]="convergenceData" [options]="convergenceOptions" type="line"></canvas>
+    </div>
+    <p class="hint" *ngIf="current.busca_aleatoria as rs">
+      Eixo x = modelos únicos avaliados (o custo real). Busca aleatória com {{ rs.orcamento }} avaliações, o mesmo
+      orçamento de {{ rs.experimento_referencia }}: melhor fitness {{ rs.cv_fitness | number: '1.4-4' }}.
+    </p>
+  </section>
+
+  <section class="card" *ngIf="current">
+    <h2>Por geração</h2>
+    <div class="form-row">
+      <label class="field">
+        Experimento
+        <select [ngModel]="experimentKey" (ngModelChange)="selectExperiment($event)">
+          <option *ngFor="let n of experimentNames" [value]="n">{{ n }}</option>
+        </select>
+      </label>
+    </div>
+    <p class="hint" *ngIf="current.experimentos[experimentKey] as exp">
+      {{ exp.descricao }} · {{ exp.historico.length }} gerações · {{ exp.avaliacoes }} avaliações
+      <span *ngIf="exp.parada_antecipada"> · parou cedo (sem melhora)</span>
+    </p>
+    <div class="chart-box">
+      <canvas baseChart [data]="detailData" [options]="detailOptions" type="line"></canvas>
+    </div>
+    <p class="hint">
+      A média sobe e a diversidade cai conforme a população converge. Diversidade = dispersão média dos genes
+      normalizados.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Rodar o AG ao vivo</h2>
+    <p class="hint">
+      Roda no servidor (POST /optimize) e é acompanhado a cada 1,5 s. A Regressão Logística leva segundos; o Random
+      Forest pode levar minutos.
+    </p>
+    <form class="form-grid" (ngSubmit)="run()">
+      <label class="field">
+        Modelo
+        <select name="modelo" [(ngModel)]="form.modelo">
+          <option value="logistic_regression">Regressão Logística</option>
+          <option value="random_forest">Random Forest</option>
+        </select>
+      </label>
+      <label class="field">
+        População (4–60)
+        <input type="number" name="pop" min="4" max="60" [(ngModel)]="form.population_size" />
+      </label>
+      <label class="field">
+        Gerações (1–40)
+        <input type="number" name="gen" min="1" max="40" [(ngModel)]="form.generations" />
+      </label>
+      <label class="field">
+        Taxa de mutação
+        <input type="number" name="mut" min="0" max="1" step="0.05" [(ngModel)]="form.mutation_rate" />
+      </label>
+      <label class="field">
+        Taxa de crossover
+        <input type="number" name="cx" min="0" max="1" step="0.05" [(ngModel)]="form.crossover_rate" />
+      </label>
+      <label class="field">
+        Seleção
+        <select name="sel" [(ngModel)]="form.selection">
+          <option value="tournament">torneio</option>
+          <option value="roulette">roleta</option>
+          <option value="rank">ranking</option>
+        </select>
+      </label>
+      <label class="field">
+        Crossover
+        <select name="cxop" [(ngModel)]="form.crossover">
+          <option value="blx">BLX-α</option>
+          <option value="uniform">uniforme</option>
+          <option value="one_point">um ponto</option>
+        </select>
+      </label>
+      <label class="field">
+        Mutação
+        <select name="mutop" [(ngModel)]="form.mutation">
+          <option value="gaussian">gaussiana</option>
+          <option value="uniform">uniforme</option>
+        </select>
+      </label>
+      <label class="field">
+        Semente
+        <input type="number" name="seed" [(ngModel)]="form.seed" />
+      </label>
+      <div class="field run-btn">
+        <button type="submit" [disabled]="running">
+          <span class="spinner-label" *ngIf="running"><span class="spinner"></span> Rodando…</span>
+          <span *ngIf="!running">Rodar o AG</span>
+        </button>
+      </div>
+    </form>
+
+    <p class="error" *ngIf="jobError">{{ jobError }}</p>
+
+    <ng-container *ngIf="job">
+      <div class="progress" *ngIf="job.progress">
+        <div class="progress__bar" [style.width.%]="progressPct"></div>
+      </div>
+      <p class="hint" *ngIf="job.progress as p">
+        Geração {{ p.geracao }} de {{ p.total }} · melhor fitness até agora {{ p.melhor_fitness | number: '1.4-4' }}
+        <span *ngIf="job.status === 'concluido'"> · <strong>concluído</strong></span>
+      </p>
+      <div class="chart-box">
+        <canvas baseChart [data]="liveData" [options]="liveOptions" type="line"></canvas>
+      </div>
+      <div class="result-box" *ngIf="job.resultado as r">
+        <strong>Melhor fitness {{ r.best_fitness | number: '1.4-4' }}</strong>
+        (original da Fase 1: {{ r.baseline_fitness | number: '1.4-4' }}) · {{ r.evaluations }} avaliações em
+        {{ r.elapsed_s | number: '1.1-1' }} s
+        <p>Hiperparâmetros: <code *ngFor="let p of liveParams()">{{ p.key }}={{ p.value }}</code></p>
+        <p>Esta execução não troca o modelo em produção.</p>
+      </div>
+    </ng-container>
+  </section>
+</div>

@@ -1,0 +1,92 @@
+<div class="page">
+  <header class="page__header">
+    <h1>Paciente + LLM</h1>
+    <p>
+      A jornada do médico: escolha uma paciente do conjunto de teste, veja a previsão do modelo otimizado, peça a
+      explicação em linguagem natural e faça uma pergunta livre. Provedor atual:
+      <strong>{{ api.provider$ | async }}</strong>.
+    </p>
+  </header>
+
+  <div class="grid-2">
+    <section class="card">
+      <h2>1. Escolha a paciente</h2>
+      <app-patient-picker [selected]="sample?.indice ?? null" (pick)="pick($event)"></app-patient-picker>
+    </section>
+
+    <section class="card" *ngIf="!sample">
+      <h2>2. Previsão</h2>
+      <p class="hint">Clique numa linha da tabela para escolher a paciente.</p>
+    </section>
+
+    <section class="card" *ngIf="sample">
+      <h2>2. Previsão · paciente #{{ sample.indice }}</h2>
+      <p class="error" *ngIf="predictError">{{ predictError }}</p>
+      <ng-container *ngIf="prediction?.resultados?.[0] as r">
+        <div class="stat-grid">
+          <div class="stat-tile">
+            <div class="stat-tile__label">Probabilidade de malignidade</div>
+            <div class="stat-tile__value">{{ r.probabilidade_malignidade | percent: '1.1-1' }}</div>
+          </div>
+          <div class="stat-tile">
+            <div class="stat-tile__label">Limiar otimizado</div>
+            <div class="stat-tile__value">{{ r.limiar }}</div>
+          </div>
+        </div>
+        <span class="badge" [ngClass]="alert ? 'badge--danger' : 'badge--ok'">{{ r.orientacao }}</span>
+        <p class="hint">
+          Diagnóstico real (só para conferência): {{ sample.diagnostico_real === 'M' ? 'maligno' : 'benigno' }} ·
+          modelo {{ sample.acertou ? 'acertou' : 'errou' }}. {{ prediction?.modelo }} ({{ prediction?.origem }}).
+        </p>
+      </ng-container>
+      <details class="section">
+        <summary>Medidas da paciente <small>{{ measures().length }} atributos</small></summary>
+        <div class="table-scroll">
+          <table class="data-table">
+            <tbody>
+              <tr *ngFor="let m of measures()">
+                <td>{{ m.key }}</td>
+                <td class="num">{{ m.value | number: '1.0-4' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <div class="grid-2" *ngIf="sample">
+    <section class="card">
+      <h2>3. Explicação para o médico</h2>
+      <div class="form-row">
+        <label class="field">
+          Estratégia de prompt
+          <select [(ngModel)]="strategy" [disabled]="explaining">
+            <option *ngFor="let s of strategies" [value]="s.id">{{ s.label }}</option>
+          </select>
+        </label>
+        <button type="button" (click)="explain()" [disabled]="explaining">Explicar</button>
+      </div>
+      <app-llm-loading *ngIf="explaining"></app-llm-loading>
+      <p class="error" *ngIf="explainError">{{ explainError }}</p>
+      <ng-container *ngIf="explanation && !explaining">
+        <app-llm-badge [meta]="explanation" [latency]="explanation.latency_s"></app-llm-badge>
+        <p class="llm-text">{{ explanation.text || '(sem resposta)' }}</p>
+      </ng-container>
+    </section>
+
+    <section class="card">
+      <h2>4. Pergunta livre</h2>
+      <textarea [(ngModel)]="question" maxlength="500" [disabled]="asking"></textarea>
+      <div class="form-row">
+        <button type="button" (click)="ask()" [disabled]="asking || question.trim().length < 3">Perguntar</button>
+      </div>
+      <app-llm-loading *ngIf="asking"></app-llm-loading>
+      <p class="error" *ngIf="askError">{{ askError }}</p>
+      <ng-container *ngIf="answer && !asking">
+        <app-llm-badge [meta]="answer" [latency]="answer.latency_s"></app-llm-badge>
+        <p class="llm-text">{{ answer.text || '(sem resposta)' }}</p>
+      </ng-container>
+    </section>
+  </div>
+</div>

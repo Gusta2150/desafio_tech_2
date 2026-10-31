@@ -1,0 +1,69 @@
+<div class="page">
+  <header class="page__header">
+    <h1>Inspetor da LLM</h1>
+    <p>
+      Para conferência: o prompt enviado, o contexto numérico (grounding), a resposta bruta, o JSON interpretado, as
+      notas automáticas, a nota do LLM juiz, a latência e os tokens. Se a LLM real falhar, o selo mostra que a resposta
+      veio do template offline, e por quê.
+    </p>
+  </header>
+
+  <div class="grid-2">
+    <section class="card">
+      <h2>Paciente</h2>
+      <app-patient-picker [selected]="sample?.indice ?? null" (pick)="pick($event)"></app-patient-picker>
+    </section>
+
+    <section class="card">
+      <h2>Chamada</h2>
+      <p class="hint" *ngIf="!sample">Escolha uma paciente na tabela.</p>
+      <ng-container *ngIf="sample">
+        <p class="hint">
+          Paciente <strong>#{{ sample.indice }}</strong> · real {{ sample.diagnostico_real === 'M' ? 'maligno' : 'benigno' }} ·
+          probabilidade {{ sample.probabilidade | percent: '1.1-1' }} · provedor
+          <strong>{{ api.provider$ | async }}</strong>
+        </p>
+        <div class="form-row">
+          <label class="field">
+            Estratégia
+            <select [(ngModel)]="strategy" [disabled]="!!loading">
+              <option *ngFor="let s of strategies" [value]="s.id">{{ s.label }}</option>
+            </select>
+          </label>
+          <label class="check">
+            <input type="checkbox" [(ngModel)]="judge" [disabled]="!!loading" /> com juiz
+          </label>
+        </div>
+        <div class="form-row">
+          <button type="button" (click)="inspect()" [disabled]="!!loading">
+            Inspecionar ({{ calls(false) }} chamada{{ calls(false) > 1 ? 's' : '' }})
+          </button>
+          <button type="button" class="secondary" (click)="compare()" [disabled]="!!loading">
+            Comparar as 3 estratégias ({{ calls(true) }} chamadas)
+          </button>
+        </div>
+        <p class="hint">
+          Com o provedor offline não há cota nem juiz. No groq, cada chamada conta na cota diária; respostas já obtidas
+          ficam guardadas e não são pedidas de novo.
+        </p>
+        <app-llm-loading *ngIf="loading"></app-llm-loading>
+        <p class="error" *ngIf="error">{{ error }}</p>
+      </ng-container>
+    </section>
+  </div>
+
+  <section class="card" *ngIf="inspection && !loading">
+    <h2>Resultado · {{ label(inspection.estrategia) }}</h2>
+    <app-inspection-view [data]="inspection"></app-inspection-view>
+  </section>
+
+  <ng-container *ngIf="comparison && !loading">
+    <h2>As 3 estratégias, mesma paciente</h2>
+    <div class="grid-3">
+      <section class="card" *ngFor="let c of comparison">
+        <h2>{{ label(c.estrategia) }}</h2>
+        <app-inspection-view [data]="c" [compact]="true"></app-inspection-view>
+      </section>
+    </div>
+  </ng-container>
+</div>

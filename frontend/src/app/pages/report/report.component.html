@@ -1,0 +1,31 @@
+<div class="page">
+  <header class="page__header">
+    <h1>Relatório para a equipe clínica</h1>
+    <p>
+      A LLM resume, em linguagem clínica, o que mudou entre o modelo original (Fase 1) e o otimizado pelo AG, usando
+      só as métricas do conjunto de teste.
+    </p>
+  </header>
+
+  <section class="card">
+    <h2>Gerar agora</h2>
+    <div class="form-row">
+      <button type="button" (click)="generate()" [disabled]="loading">
+        Gerar com o provedor {{ api.provider$ | async }}
+      </button>
+    </div>
+    <app-llm-loading *ngIf="loading"></app-llm-loading>
+    <p class="error" *ngIf="error">{{ error }}</p>
+    <ng-container *ngIf="generated && !loading">
+      <app-llm-badge [meta]="generated" [latency]="generated.latency_s"></app-llm-badge>
+      <p class="llm-text">{{ generated.text || '(sem resposta)' }}</p>
+    </ng-container>
+  </section>
+
+  <section class="card" *ngIf="saved">
+    <h2>Salvo na avaliação da LLM</h2>
+    <p class="hint">Gerado durante <code>scripts.evaluate_llm</code> ({{ savedFrom }}); exibido sem nova chamada.</p>
+    <app-llm-badge [meta]="saved" [latency]="saved.latency_s"></app-llm-badge>
+    <p class="llm-text">{{ saved.text }}</p>
+  </section>
+</div>

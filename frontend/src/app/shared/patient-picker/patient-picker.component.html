@@ -1,0 +1,58 @@
+<div class="picker">
+  <div class="chip-row">
+    <button
+      *ngFor="let f of filters"
+      type="button"
+      class="chip"
+      [class.chip--active]="filter === f.id"
+      (click)="setFilter(f.id)"
+    >
+      {{ f.label }}
+    </button>
+  </div>
+
+  <p class="error" *ngIf="error">{{ error }}</p>
+
+  <ng-container *ngIf="data">
+    <p class="hint picker__hint">
+      {{ data.total }} paciente(s) · limiar do modelo {{ data.limiar }} · "perto do limiar" = até
+      {{ data.perto_do_limiar }} de distância. Erros e casos difíceis aparecem primeiro.
+    </p>
+    <div class="table-scroll picker__scroll">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Paciente</th>
+            <th>Real</th>
+            <th>Probabilidade</th>
+            <th>Modelo</th>
+            <th>Resultado</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            *ngFor="let row of data.amostras"
+            class="clickable"
+            [class.row-selected]="row.indice === selected"
+            (click)="pick.emit(row)"
+          >
+            <td>#{{ row.indice }}</td>
+            <td>
+              <span class="badge" [ngClass]="row.diagnostico_real === 'M' ? 'badge--danger' : 'badge--ok'">
+                {{ row.diagnostico_real === 'M' ? 'Maligno' : 'Benigno' }}
+              </span>
+            </td>
+            <td>{{ row.probabilidade | percent: '1.1-1' }}</td>
+            <td>{{ row.alerta ? 'Alerta' : 'Sem alerta' }}</td>
+            <td>
+              <span class="badge" [ngClass]="row.acertou ? 'badge--muted' : 'badge--warn'">
+                {{ row.acertou ? 'acertou' : (row.alerta ? 'falso positivo' : 'falso negativo') }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </ng-container>
+  <p class="hint" *ngIf="loading">Carregando pacientes…</p>
+</div>

@@ -1,0 +1,10 @@
+.picker__hint {
+  margin: 0.25rem 0 0.6rem;
+}
+
+.picker__scroll {
+  max-height: 340px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}

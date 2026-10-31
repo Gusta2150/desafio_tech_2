@@ -1,0 +1,79 @@
+<app-llm-badge [meta]="data" [latency]="data.latencia_s"></app-llm-badge>
+<p class="hint">
+  Estratégia <code>{{ data.estrategia }}</code> · prompt {{ data.prompt_version }} ·
+  json_mode {{ data.json_mode ? 'ligado' : 'desligado' }} · JSON {{ data.valid_json ? 'válido' : 'inválido' }} ·
+  score geral <strong>{{ data.notas.score_geral | number: '1.3-3' }}</strong>
+</p>
+
+<details class="section" [open]="true">
+  <summary>Resposta (texto mostrado ao médico) <small>{{ data.notas.palavras }} palavras</small></summary>
+  <p class="llm-text">{{ data.texto || '(sem resposta)' }}</p>
+</details>
+
+<details class="section" [open]="!compact">
+  <summary>Notas automáticas <small>0 a 1</small></summary>
+  <table class="data-table">
+    <tbody>
+      <tr *ngFor="let s of scoreLabels">
+        <td>{{ s[1] }} <span class="hint">· {{ s[2] }}</span></td>
+        <td class="num">{{ score(s[0]) | number: '1.2-2' }}</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="hint" *ngIf="data.notas.numeros_inventados.length">
+    Números sem correspondência no contexto: <code *ngFor="let n of data.notas.numeros_inventados">{{ n }}</code>
+  </p>
+  <p class="hint" *ngIf="data.notas.violacoes.length">Violações de segurança: {{ data.notas.violacoes.join(', ') }}</p>
+</details>
+
+<details class="section" [open]="!compact">
+  <summary>LLM juiz <small>{{ data.juiz ? 'média ' + (data.juiz.media | number: '1.2-2') + ' / 5' : '—' }}</small></summary>
+  <ng-container *ngIf="data.juiz as j; else noJudge">
+    <table class="data-table">
+      <tbody>
+        <tr><td>Clareza</td><td class="num">{{ j.clareza }}</td></tr>
+        <tr><td>Utilidade clínica</td><td class="num">{{ j.utilidade_clinica }}</td></tr>
+        <tr><td>Fidelidade</td><td class="num">{{ j.fidelidade }}</td></tr>
+        <tr><td>Segurança</td><td class="num">{{ j.seguranca }}</td></tr>
+      </tbody>
+    </table>
+    <p class="llm-text" *ngIf="j.comentario">{{ j.comentario }}</p>
+  </ng-container>
+  <ng-template #noJudge><p class="hint">{{ judgeStatus[data.juiz_status] }}</p></ng-template>
+</details>
+
+<details class="section" [open]="!compact">
+  <summary>Latência e tokens <small>{{ data.latencia_s | number: '1.2-2' }} s</small></summary>
+  <table class="data-table" *ngIf="usage().length; else noUsage">
+    <tbody>
+      <tr *ngFor="let u of usage()"><td>{{ u.key }}</td><td class="num">{{ u.value }}</td></tr>
+    </tbody>
+  </table>
+  <ng-template #noUsage><p class="hint">O provedor não informou consumo de tokens (o offline não usa tokens).</p></ng-template>
+  <p class="hint">A latência inclui as esperas por limite de taxa (HTTP 429).</p>
+</details>
+
+<details class="section">
+  <summary>Prompt de sistema <small>{{ data.prompt_system.length }} caracteres</small></summary>
+  <pre class="code-block">{{ data.prompt_system }}</pre>
+</details>
+
+<details class="section">
+  <summary>Prompt do usuário <small>{{ data.prompt_user.length }} caracteres</small></summary>
+  <pre class="code-block">{{ data.prompt_user }}</pre>
+</details>
+
+<details class="section">
+  <summary>Contexto (grounding) <small>os únicos números que a LLM pode usar</small></summary>
+  <pre class="code-block">{{ json(data.contexto) }}</pre>
+</details>
+
+<details class="section">
+  <summary>Resposta bruta <small>como veio do provedor</small></summary>
+  <pre class="code-block">{{ data.resposta_bruta || '(vazia)' }}</pre>
+</details>
+
+<details class="section">
+  <summary>JSON interpretado</summary>
+  <pre class="code-block">{{ data.estruturado ? json(data.estruturado) : '(não foi possível extrair JSON)' }}</pre>
+</details>

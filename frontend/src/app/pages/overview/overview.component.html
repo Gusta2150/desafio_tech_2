@@ -1,0 +1,108 @@
+<div class="page">
+  <header class="page__header">
+    <h1>Fase 2 · otimização por algoritmo genético + LLM</h1>
+    <p>
+      O modelo de triagem da Fase 1 teve os hiperparâmetros (e o limiar de decisão) otimizados por um algoritmo
+      genético. Uma LLM explica cada previsão em linguagem natural para o médico, com base só nos números do modelo.
+    </p>
+  </header>
+
+  <p class="error" *ngIf="error">{{ error }}</p>
+
+  <ng-container *ngIf="model">
+    <section class="card">
+      <h2>Modelo em produção</h2>
+      <div class="stat-grid">
+        <div class="stat-tile">
+          <div class="stat-tile__label">Modelo</div>
+          <div class="stat-tile__value">{{ model.display_name }}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-tile__label">Experimento vencedor</div>
+          <div class="stat-tile__value">{{ model.source }}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-tile__label">Medidas por paciente</div>
+          <div class="stat-tile__value">{{ model.features.length }}</div>
+        </div>
+      </div>
+      <p class="hint">
+        Hiperparâmetros otimizados:
+        <code *ngFor="let p of params()">{{ p.key }}={{ p.value }}</code>
+      </p>
+      <p class="hint">
+        Fitness do AG (validação cruzada):
+        <code *ngFor="let w of model.fitness_weights | keyvalue">{{ w.key }} × {{ w.value }}</code>
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Original (Fase 1) × otimizado (Fase 2), no conjunto de teste</h2>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Métrica</th>
+              <th class="num">Original</th>
+              <th class="num">Otimizado</th>
+              <th class="num">Diferença</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of metrics">
+              <td>{{ row.label }}</td>
+              <ng-container *ngIf="row.percent; else plain">
+                <td class="num">{{ model.baseline_test_metrics[row.key] | percent: '1.1-1' }}</td>
+                <td class="num">{{ model.test_metrics[row.key] | percent: '1.1-1' }}</td>
+                <td class="num" [class.delta-good]="improved(row) === true" [class.delta-bad]="improved(row) === false">
+                  {{ delta(row) * 100 | number: '1.1-1' }} p.p.
+                </td>
+              </ng-container>
+              <ng-template #plain>
+                <td class="num">{{ model.baseline_test_metrics[row.key] | number: '1.0-3' }}</td>
+                <td class="num">{{ model.test_metrics[row.key] | number: '1.0-3' }}</td>
+                <td class="num" [class.delta-good]="improved(row) === true" [class.delta-bad]="improved(row) === false">
+                  {{ delta(row) | number: '1.0-3' }}
+                </td>
+              </ng-template>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">
+        A prioridade clínica é o recall: um falso negativo é um câncer não sinalizado. Verde = melhorou; vermelho =
+        piorou (para falsos negativos e positivos, menor é melhor).
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>O que cada tela mostra</h2>
+      <div class="grid-2">
+        <div>
+          <h3><a routerLink="/algoritmo-genetico">Algoritmo genético</a></h3>
+          <p class="hint">5 configurações do AG × 2 modelos, convergência por geração, comparação com a busca aleatória
+            e uma execução ao vivo.</p>
+        </div>
+        <div>
+          <h3><a routerLink="/paciente">Paciente + LLM</a></h3>
+          <p class="hint">A jornada do médico: escolher uma paciente do teste, ver a previsão, pedir a explicação e fazer
+            uma pergunta livre.</p>
+        </div>
+        <div>
+          <h3><a routerLink="/inspetor">Inspetor da LLM</a></h3>
+          <p class="hint">Tudo o que entra e sai da LLM: prompts, contexto, resposta bruta, notas automáticas, juiz,
+            tokens e latência. Compara as 3 estratégias de prompt.</p>
+        </div>
+        <div>
+          <h3><a routerLink="/avaliacao">Avaliação da LLM</a></h3>
+          <p class="hint">Resultado salvo da avaliação em 10 casos: critérios automáticos e notas do LLM juiz por
+            estratégia.</p>
+        </div>
+      </div>
+      <p class="hint">
+        O seletor <strong>Provedor da LLM</strong>, no topo, começa em <code>offline</code> (template determinístico,
+        sem chave nem cota). Troque para <code>groq</code> para chamar a LLM real.
+      </p>
+    </section>
+  </ng-container>
+</div>

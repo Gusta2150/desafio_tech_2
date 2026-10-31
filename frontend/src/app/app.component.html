@@ -1,0 +1,24 @@
+<app-top-bar></app-top-bar>
+
+<div class="shell">
+  <div class="shell__bar">
+    <nav class="shell__tabs">
+      <a *ngFor="let link of links" [routerLink]="link.path" routerLinkActive="active">{{ link.label }}</a>
+    </nav>
+    <label class="shell__provider">
+      <span>Provedor da LLM</span>
+      <select [value]="api.provider$ | async" (change)="setProvider($any($event.target).value)">
+        <option *ngFor="let p of providers" [value]="p.id">{{ p.label }}</option>
+      </select>
+    </label>
+  </div>
+
+  <p class="shell__quota" *ngIf="(api.provider$ | async) === 'groq'">
+    Groq gratuito: limite por minuto e 1.000 requisições por dia. A LLM só é chamada quando você clica num botão,
+    e respostas já obtidas ficam guardadas nesta aba.
+  </p>
+
+  <app-clinical-disclaimer></app-clinical-disclaimer>
+</div>
+
+<router-outlet></router-outlet>

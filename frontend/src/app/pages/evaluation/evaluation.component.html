@@ -1,0 +1,157 @@
+<div class="page">
+  <header class="page__header">
+    <h1>Avaliação da LLM</h1>
+    <p>
+      Resultado salvo por <code>python -m scripts.evaluate_llm</code>: as 3 estratégias de prompt em 10 pacientes do
+      teste, com critérios automáticos reprodutíveis e, quando houver, notas de um LLM juiz. Esta tela só lê o arquivo
+      salvo e não chama a LLM.
+    </p>
+  </header>
+
+  <p class="error" *ngIf="error">{{ error }}</p>
+  <p class="hint" *ngIf="!error && !list.length">Nenhuma avaliação salva em reports/results/.</p>
+
+  <div class="chip-row" *ngIf="list.length > 1">
+    <button
+      *ngFor="let e of list"
+      type="button"
+      class="chip"
+      [class.chip--active]="e.provider === selected"
+      (click)="select(e.provider)"
+    >
+      {{ e.provider }} · {{ e.model }}
+    </button>
+  </div>
+
+  <ng-container *ngIf="detail as d">
+    <section class="card">
+      <h2>Execução avaliada</h2>
+      <div class="stat-grid">
+        <div class="stat-tile">
+          <div class="stat-tile__label">Provedor / modelo</div>
+          <div class="stat-tile__value">{{ d.provider }} · {{ d.model }}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-tile__label">LLM juiz</div>
+          <div class="stat-tile__value">{{ d.judge ? d.judge + ' · ' + d.judge_model : 'sem juiz' }}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-tile__label">Casos × estratégias</div>
+          <div class="stat-tile__value">{{ d.cases }} × {{ strategies.length }}</div>
+        </div>
+        <div class="stat-tile">
+          <div class="stat-tile__label">Falhas</div>
+          <div class="stat-tile__value">
+            <span class="badge" [ngClass]="totalFailures ? 'badge--danger' : 'badge--ok'">
+              {{ totalFailures ? totalFailures + ' falha(s)' : 'nenhuma' }}
+            </span>
+          </div>
+        </div>
+      </div>
+      <p class="hint">
+        Falhas por tipo: <code *ngFor="let f of d.falhas | keyvalue">{{ f.key }}={{ f.value }}</code>
+        <span *ngIf="d.provider === 'offline'"> · o provedor offline é um template determinístico (referência, não LLM).</span>
+      </p>
+    </section>
+
+    <div class="grid-2">
+      <section class="card">
+        <h2>Critérios automáticos por estratégia</h2>
+        <div class="chart-box">
+          <canvas baseChart [data]="criteriaData" [options]="criteriaOptions" type="bar"></canvas>
+        </div>
+      </section>
+      <section class="card">
+        <h2>LLM juiz</h2>
+        <div class="chart-box" *ngIf="judgeData.labels?.length; else noJudge">
+          <canvas baseChart [data]="judgeData" [options]="judgeOptions" type="bar"></canvas>
+        </div>
+        <ng-template #noJudge><p class="hint">Esta avaliação não usou juiz.</p></ng-template>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>Médias por estratégia</h2>
+      <div class="table-scroll">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Estratégia</th>
+              <th class="num">Score geral</th>
+              <th class="num">Formato</th>
+              <th class="num">Fidelidade</th>
+              <th class="num">Cobertura</th>
+              <th class="num">Segurança</th>
+              <th class="num">Juiz (1–5)</th>
+              <th class="num">Palavras</th>
+              <th class="num">Latência</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let s of strategies">
+              <td>{{ label(s) }}</td>
+              <td class="num">{{ d.resumo[s]['score_geral'] | number: '1.3-3' }}</td>
+              <td class="num">{{ d.resumo[s]['formato'] | number: '1.2-2' }}</td>
+              <td class="num">{{ d.resumo[s]['fidelidade'] | number: '1.2-2' }}</td>
+              <td class="num">{{ d.resumo[s]['cobertura'] | number: '1.2-2' }}</td>
+              <td class="num">{{ d.resumo[s]['seguranca'] | number: '1.2-2' }}</td>
+              <td class="num">{{ d.resumo[s]['juiz_media'] !== undefined ? (d.resumo[s]['juiz_media'] | number: '1.2-2') : '—' }}</td>
+              <td class="num">{{ d.resumo[s]['palavras'] | number: '1.0-0' }}</td>
+              <td class="num">{{ d.resumo[s]['latencia_s'] | number: '1.1-1' }} s</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">
+        Latência inclui as esperas por limite de taxa do plano gratuito. O formato do "básico" é 0 por definição: ele
+        pede texto livre, não JSON.
+      </p>
+    </section>
+
+    <section class="card">
+      <h2>Por caso</h2>
+      <div class="table-scroll" style="max-height: 420px; overflow-y: auto">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Paciente</th>
+              <th>Real</th>
+              <th>Estratégia</th>
+              <th class="num">Score geral</th>
+              <th class="num">Fidelidade</th>
+              <th class="num">Cobertura</th>
+              <th class="num">Segurança</th>
+              <th class="num">Juiz</th>
+              <th>Comentário do juiz</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let r of d.linhas">
+              <td>#{{ r.caso }}</td>
+              <td>{{ r.diagnostico_real === 1 ? 'M' : 'B' }}</td>
+              <td>{{ label(r.estrategia) }}</td>
+              <td class="num">{{ r.score_geral | number: '1.3-3' }}</td>
+              <td class="num">{{ r.fidelidade | number: '1.2-2' }}</td>
+              <td class="num">{{ r.cobertura | number: '1.2-2' }}</td>
+              <td class="num">{{ r.seguranca | number: '1.2-2' }}</td>
+              <td class="num">{{ r.juiz ? (r.juiz.media | number: '1.2-2') : '—' }}</td>
+              <td class="hint">{{ r.juiz?.comentario }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Exemplos de respostas</h2>
+      <details class="section" *ngFor="let ex of d.exemplos; let first = first" [open]="first">
+        <summary>
+          Paciente #{{ ex.caso }} · {{ label(ex.estrategia) }}
+          <small>score {{ ex.scores.score_geral | number: '1.3-3' }}</small>
+        </summary>
+        <p class="error" *ngIf="ex.erro">{{ ex.erro }}</p>
+        <p class="llm-text">{{ ex.texto || '(sem resposta)' }}</p>
+      </details>
+    </section>
+  </ng-container>
+</div>

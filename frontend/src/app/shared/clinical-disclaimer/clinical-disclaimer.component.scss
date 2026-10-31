@@ -1,0 +1,26 @@
+.disclaimer {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  background: var(--warning-soft);
+  border: 1px solid rgba(251, 191, 36, 0.28);
+  border-radius: var(--radius-md);
+  padding: 0.85rem 1rem;
+  margin-bottom: 1.5rem;
+
+  &__icon {
+    font-size: 1.2rem;
+    line-height: 1;
+  }
+
+  p {
+    margin: 0;
+    font-size: 0.87rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+
+    strong {
+      color: var(--warning);
+    }
+  }
+}
