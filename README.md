@@ -60,6 +60,7 @@ tech-challenge-fase2/
 ├── data/data.csv                # mesmo dataset da Fase 1
 ├── deploy/                      # nginx, Prometheus, Grafana, Kubernetes (HPA + Job)
 ├── docs/arquitetura.md          # arquitetura e decisões
+├── frontend/                    # aplicação web Angular (AG + LLM na tela)
 ├── models/                      # best_model.joblib + model_card.json (gerados)
 ├── notebooks/02_demo_fase2.ipynb
 ├── reports/
@@ -142,8 +143,41 @@ uvicorn src.api.main:app --port 8000      # documentação em http://localhost:8
 | `GET /experiments` | Tabela de resultados do AG |
 | `POST /optimize` · `GET /optimize/{id}` | Roda o AG em segundo plano e acompanha o progresso |
 | `GET /model` · `/health` · `/ready` · `/metrics` | Modelo em produção, sondas e métricas Prometheus |
+| `GET /samples` | Pacientes do teste com a previsão (erros e casos perto do limiar primeiro; filtro `erros`, `limiar`, `malignos`, `benignos`) |
+| `POST /llm/inspect` · `POST /llm/compare` | Tudo o que entra e sai da LLM (prompts, contexto, resposta bruta, notas, juiz, tokens); as 3 estratégias em sequência |
+| `GET /llm/evaluations` · `GET /llm/evaluations/{provider}` | Avaliações salvas da LLM |
+| `GET /experiments/history` | Convergência por geração e curva da busca aleatória |
 
-### 5. Escalabilidade e monitoramento
+### 5. Aplicação web
+
+Interface Angular em [`frontend/`](frontend/README.md), no mesmo estilo visual do frontend da Fase 1. Dois terminais:
+
+```bash
+uvicorn src.api.main:app --port 8000          # nesta pasta (tech-challenge-fase2/)
+
+cd frontend
+npm install --legacy-peer-deps                # só na primeira vez
+npm start                                     # http://localhost:4201
+```
+
+| Tela | O que mostra |
+|---|---|
+| Visão geral | Modelo em produção e original × otimizado no teste |
+| Algoritmo genético | Experimentos, convergência × busca aleatória, histórico por geração e o AG rodando ao vivo |
+| Paciente + LLM | A jornada do médico: escolher a paciente, ver a previsão, pedir a explicação e fazer uma pergunta livre |
+| Inspetor da LLM | Prompt de sistema e do usuário, contexto, resposta bruta, JSON, notas automáticas, juiz, latência e tokens; as 3 estratégias lado a lado |
+| Avaliação da LLM | A avaliação salva em `reports/results/` (médias, gráficos, tabela por caso, exemplos, falhas) |
+| Relatório clínico | Relatório "original × otimizado" para a equipe clínica |
+
+- **Seletor de provedor** no topo: `offline` (padrão: template determinístico, sem chave nem cota) ou `groq`
+  (LLM real). Para navegar ou gravar sem gastar a cota, deixe em `offline`.
+- A LLM só é chamada quando alguém clica num botão. As respostas ficam em memória, então voltar a uma tela não gasta a
+  cota (o Groq gratuito tem limite por minuto e 1.000 requisições por dia).
+- Toda resposta mostra um selo com provedor e modelo. Se a LLM real falhar, aparece o alerta "template offline" com o
+  motivo.
+- A chave fica só no `.env` da API; o navegador nunca a recebe.
+
+### 6. Escalabilidade e monitoramento
 
 ```bash
 docker compose up --build --scale api=3          # API em :8080, Prometheus em :9090, Grafana em :3000
@@ -151,7 +185,7 @@ kubectl apply -f deploy/k8s/api.yaml             # Kubernetes com HPA (2–10 r�
 kubectl apply -f deploy/k8s/ga-job.yaml          # AG como Job em lote
 ```
 
-### 6. Testes
+### 7. Testes
 
 ```bash
 pytest
