@@ -1,0 +1,5 @@
+# Binários: nunca converter fim de linha (evita PDF corrompido no checkout no Windows)
+*.pdf binary
+*.png binary
+*.ico binary
+*.joblib binary
