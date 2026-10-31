@@ -188,7 +188,8 @@ A LLM não acessa o modelo nem os dados brutos. Para cada paciente, a API monta 
 - **Explicação de casos** (/interpret): resumo, fatores relevantes, confiabilidade, recomendação, limitações e aviso, em JSON.
 - **Insights de desempenho** (/report/performance): traduz a comparação original × otimizado (recall, falsos negativos etc.) em impacto clínico para a equipe.
 - **Perguntas livres** (/ask): o(a) médico(a) pergunta em linguagem natural sobre o caso — base para a integração com dados textuais do Módulo 3.
-- **Provedores plugáveis**: qualquer API compatível com OpenAI (LLaMA 3 via Groq ou Ollama local, GPT, LM Studio) e a API da Anthropic, configurados por variáveis de ambiente.
+- **Provedores plugáveis**: qualquer API compatível com OpenAI (GPT-OSS 120B via Groq, LLaMA via Ollama local, GPT, LM Studio) e a API da Anthropic, configurados por variáveis de ambiente. O padrão é o Groq com openai/gpt-oss-120b (o Groq descontinuou o LLaMA 3.3 70B); como é um modelo de raciocínio, usa reasoning_effort=low para o raciocínio não consumir os tokens da resposta JSON.
+- **Limite de taxa**: respostas 429 e erros temporários são repetidos respeitando o Retry-After da API; uma avaliação com falhas de API é salva à parte e nunca entra neste relatório.
 - **Fallback**: se a LLM falha ou responde fora do formato, a API devolve uma explicação por template e registra o evento na métrica llm_requests_total{status="fallback"}.
 
 ### 7.2 Prompt engineering
@@ -234,35 +235,35 @@ Regras obrigatórias:
 | legibilidade | Tamanho médio das frases (≤ 25 palavras = 1) |
 | juiz (opcional) | Outra LLM dá notas 1–5 para clareza, utilidade clínica, fidelidade e segurança |
 
-Resultados com **offline / template-v1** em 10 casos do teste (erros do modelo, casos próximos ao limiar e casos típicos de cada classe):
+Resultados com **groq / openai/gpt-oss-120b** em 10 casos do teste (erros do modelo, casos próximos ao limiar e casos típicos de cada classe):
 
-| Estratégia | formato | fidelidade | cobertura | coerencia | seguranca | legibilidade | score_geral | latência (s) |
-|---|---|---|---|---|---|---|---|---|
-| basico | 0,00 | 1,00 | 1,00 | 1,00 | 1,00 | 1,00 | 0,83 | 0,00 |
-| estruturado | 1,00 | 1,00 | 1,00 | 1,00 | 1,00 | 1,00 | 1,00 | 0,00 |
-| few_shot | 1,00 | 1,00 | 1,00 | 1,00 | 1,00 | 1,00 | 1,00 | 0,00 |
+| Estratégia | formato | fidelidade | cobertura | coerencia | seguranca | legibilidade | score_geral | juiz (1–5) | latência (s) |
+|---|---|---|---|---|---|---|---|---|---|
+| basico | 0,00 | 0,98 | 1,00 | 1,00 | 0,50 | 1,00 | 0,75 | 4,78 | 7,28 |
+| estruturado | 1,00 | 1,00 | 0,93 | 1,00 | 1,00 | 1,00 | 0,99 | 4,65 | 9,75 |
+| few_shot | 1,00 | 1,00 | 0,90 | 1,00 | 1,00 | 1,00 | 0,98 | 4,53 | 18,23 |
 
-![Figura 7 — Qualidade das interpretações por estratégia de prompt.](figures/llm_avaliacao_offline.png)
+![Figura 7 — Qualidade das interpretações por estratégia de prompt.](figures/llm_avaliacao_groq.png)
 
 *Figura 7 — Qualidade das interpretações por estratégia de prompt.*
 
-**Atenção:** estes números foram gerados com o provedor *offline* (template determinístico), que serve de referência e de fallback. Para a avaliação com uma LLM real execute *python -m scripts.evaluate_llm --provider groq --judge groq* (ou ollama) e gere o relatório novamente.
+O prompt básico teve score geral 0,75, contra 0,98 do few-shot: sem regras e sem formato, a LLM tende a omitir o aviso, a não produzir JSON e a usar números que não estão no contexto.
 
 Exemplo de explicação gerada (estratégia few_shot):
 
 ```text
-Resumo: O modelo estimou probabilidade de malignidade de 46.0%, acima do limiar de decisão de 0.26. Faixa de risco: moderado (acima do limiar).
+Resumo: O modelo estimou probabilidade de malignidade de 46.0%, acima do limiar de decisão de 0.26, colocando a amostra na faixa de risco moderado.
 
 Fatores relevantes:
-• textura (pior valor): 41.61 (média benignos 23.7161, média malignos 29.5743) — aumenta o risco
-• textura (média): 30.72 (média benignos 18.0486, média malignos 21.7129) — aumenta o risco
-• simetria (pior valor): 0.2196 (média benignos 0.2706, média malignos 0.3261) — reduz o risco
+• Textura (pior valor) de 41.61, acima da média de malignos (29.5743) — aumenta o risco.
+• Textura (média) de 30.72, acima da média de malignos (21.7129) — aumenta o risco.
+• Simetria (pior valor) de 0.2196, abaixo da média de benignos (0.2706) — reduz o risco.
 
-Confiabilidade: No conjunto de teste, o modelo (Regressão Logística, otimizado por algoritmo genético) identificou 97.6% dos casos malignos (recall), com 1 falso(s) negativo(s) em 114 amostras.
+Confiabilidade: No teste, o modelo alcançou recall de 97.6% e identificou 1 falso negativo em 114 amostras, com precisão de 95.3%.
 
-Recomendação: Priorizar avaliação médica e considerar confirmação por exame de imagem e biópsia, conforme julgamento clínico.
+Recomendação: Considerar avaliação clínica detalhada e, se indicado, confirmação histopatológica, sempre baseada no julgamento do médico.
 
-Limitações: Estimativa estatística baseada em medidas morfológicas de núcleos celulares; não considera histórico clínico, imagem ou outros exames.
+Limitações: O modelo não incorpora histórico clínico, exame físico nem achados de imagem.
 
 Aviso: Apoio à decisão: não confirma nem descarta câncer e não substitui a avaliação médica.
 ```
@@ -270,19 +271,23 @@ Aviso: Apoio à decisão: não confirma nem descarta câncer e não substitui a 
 Exemplo de insights de desempenho para a equipe clínica (/report/performance):
 
 ```text
-Resumo: O modelo Regressão Logística otimizado por algoritmo genético obteve recall de 97.6% contra 95.2% do modelo original no teste.
+Resumo: O modelo otimizado aumentou o recall de 95,2% para 97,6% reduzindo falsos negativos de 2 para 1, mas a precisão caiu de 97,6% para 95,3% aumentando falsos positivos de 1 para 2; a acurácia permaneceu em 97,4% e o ROC AUC subiu de 0,995 para 0,997.
 
 Insights:
-• Falsos negativos no teste: 2 (original) → 1 (otimizado).
-• Falsos positivos no teste: 1 (original) → 2 (otimizado).
-• ROC-AUC: 0.995 (original) → 0.997 (otimizado).
+• Com 114 pacientes de teste, o modelo otimizado deixou de perder apenas 1 caso maligno (falso negativo) contra 2 do original, o que pode salvar um paciente que poderia ter sido subtratado.
+• A elevação do recall de 95,2% para 97,6% significa que 40 dos 42 casos malignos foram identificados pelo modelo otimizado, comparado a 38 pelo original.
+• A queda na precisão de 97,6% para 95,3% gera um aumento de falsos positivos de 1 para 2, ou seja, duas pacientes saudáveis podem ser encaminhadas para exames adicionais que antes não seriam.
+• O ROC AUC melhorou marginalmente de 0,995 para 0,997, indicando que a capacidade discriminatória do modelo está praticamente saturada.
+• A mudança no threshold de 0,5 para 0,26 foi decisiva para melhorar a sensibilidade, mas requer atenção ao balancear o número de exames desnecessários.
 
-Impacto clínico: Menos casos malignos deixariam de ser sinalizados na triagem.
+Impacto clínico: A redução de um falso negativo pode significar a detecção precoce de um câncer que, de outra forma, teria sido perdido, potencialmente melhorando o prognóstico; porém, o pequeno aumento de falsos positivos pode sobrecarregar o serviço de diagnóstico com exames adicionais sem grande benefício clínico.
 
-Recomendação: Validar o modelo em dados externos antes de qualquer uso assistencial.
+Recomendação: Realizar validação externa em uma coorte maior, analisar o custo-benefício dos falsos positivos adicionais e ajustar o threshold conforme a capacidade de triagem do hospital antes da implementação rotineira.
 
-Aviso: Métricas obtidas em base pública e amostra pequena; não substituem validação clínica.
+Aviso: Os resultados são baseados em apenas 114 amostras de teste, com 42 casos malignos; a variação estatística pode ser alta e o desempenho pode mudar em populações diferentes.
 ```
+
+**Conferência (calculada dos resultados, não pela LLM):** no teste, o modelo original detecta 40 de 42 casos malignos e o otimizado, 41 de 42; falsos positivos 1 → 2. Contagens derivadas que a LLM escreve ("x de y casos") precisam de revisão humana: o critério de fidelidade só verifica se cada número existe no contexto, não se a conta está certa.
 
 ## 8. Arquitetura, escalabilidade e monitoramento
 
@@ -297,6 +302,7 @@ Aviso: Métricas obtidas em base pública e amostra pequena; não substituem val
 - **Monitoramento**: métricas Prometheus em /metrics (volume e latência por rota, requisições em andamento, distribuição das probabilidades previstas para detectar drift, chamadas/latência/fallback da LLM, jobs do AG e melhor fitness) e Grafana no docker-compose.
 - **Logging**: logs JSON estruturados com request_id propagado (cabeçalho x-request-id).
 - **Rastreamento de experimentos**: cada execução do AG grava parâmetros, métricas por geração e resultado em reports/runs/ e, se MLFLOW_TRACKING_URI estiver definida, também no MLflow.
+- **Aplicação web** (frontend/, Angular): mostra a convergência do AG e uma execução ao vivo, a jornada do médico (paciente, previsão, explicação, pergunta livre), um inspetor com tudo o que entra e sai da LLM (prompts, contexto, resposta bruta, notas, juiz, tokens) e a avaliação salva. Um seletor offline/groq permite navegar sem gastar a cota; a chave da LLM fica só no servidor.
 - A implantação em nuvem é opcional no enunciado; os manifestos Kubernetes funcionam em qualquer cluster gerenciado (EKS, GKE, AKS).
 
 ## 9. Organização do código e testes
@@ -307,7 +313,9 @@ Projeto Python com Poetry (pyproject.toml) ou venv (requirements.txt), código e
 - o motor do AG: convergência num problema de referência, elitismo monotônico, reprodutibilidade por semente, cache, parada antecipada, semeadura e tolerância a falhas da fitness;
 - dados (split idêntico à Fase 1), modelos, limiar e fitness (inclusive o reaproveitamento sem re-treino);
 - LLM: contexto, prompts, extração de JSON, fallback, e os critérios de avaliação (números inventados, linguagem proibida, cobertura e coerência);
-- API: health/ready, previsão, validação de entrada, interpretação, perguntas, métricas e job do AG.
+- API: health/ready, previsão, validação de entrada, interpretação, perguntas, métricas e job do AG;
+- rotas da aplicação web (pacientes, inspeção da LLM, avaliações, convergência) e o contrato das rotas antigas (sem resposta bruta nem prompts);
+- provedores: novas tentativas em 429/timeout, erro imediato sem chave, leitura do .env e modelos de raciocínio com esforço baixo.
 
 ## 10. Desafios enfrentados e soluções
 
@@ -328,12 +336,12 @@ Projeto Python com Poetry (pyproject.toml) ou venv (requirements.txt), código e
 - Dataset público e pequeno (569 amostras); antes de qualquer uso assistencial é necessária validação externa e prospectiva com dados do hospital.
 - Os pesos da fitness refletem uma preferência por recall que deve ser definida com a equipe clínica.
 - Explicações locais por oclusão não tratam a correlação entre atributos (ex.: raio, perímetro e área).
-- Próximos passos (Módulo 3): ampliar o espaço de busca (seleção de atributos, outros algoritmos), otimização multiobjetivo (NSGA-II) para a fronteira recall × falsos positivos, integrar laudos textuais ao contexto da LLM e expor as explicações no frontend Angular da Fase 1.
+- Próximos passos (Módulo 3): ampliar o espaço de busca (seleção de atributos, outros algoritmos), otimização multiobjetivo (NSGA-II) para a fronteira recall × falsos positivos, integrar laudos textuais ao contexto da LLM e levar as explicações para o fluxo de atendimento (a aplicação web desta fase é uma ferramenta de demonstração e conferência, não um produto clínico).
 
 ## 12. Como reproduzir
 
 ```text
-cd tech-challenge-fase2
+git clone https://github.com/Gusta2150/desafio_tech_2.git && cd desafio_tech_2
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt                     # ou: poetry install
 python -m scripts.run_experiments                   # AG: todos os experimentos
@@ -341,6 +349,7 @@ python -m scripts.evaluate_llm --provider groq      # avaliação da LLM (GROQ_A
 python -m scripts.make_figures && python -m scripts.generate_report
 pytest                                              # testes
 uvicorn src.api.main:app --port 8000                # API em http://localhost:8000/docs
+cd frontend && npm install --legacy-peer-deps && npm start   # app web em http://localhost:4201
 ```
 
-Repositório: https://github.com/Gusta2150/desafio_tech
+Repositório: https://github.com/Gusta2150/desafio_tech_2

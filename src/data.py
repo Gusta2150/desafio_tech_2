@@ -48,7 +48,7 @@ def resolve_data_path(filename: str = "data.csv") -> Path:
             return candidate
     raise FileNotFoundError(
         f"Dataset '{filename}' não encontrado em {DATA_DIR} nem em {PHASE1_DATA_DIR}. "
-        "Extraia o data.7z da raiz do repositório para tech-challenge-fase2/data/."
+        "Coloque o data.csv (Breast Cancer Wisconsin) na pasta data/ do projeto."
     )
 
 

@@ -67,12 +67,12 @@ def main():
     arrow(ax, (11.2, 7.42), (16.8, 7.42), ls="--")
 
     # online
-    box(ax, 0.6, 2.6, 2.8, 1.6, "Médico(a) /\nfrontend Angular", GREY)
+    box(ax, 0.6, 2.6, 2.8, 1.6, "Médico(a) /\napp web Angular", GREY)
     box(ax, 4.2, 2.6, 2.6, 1.6, "nginx / Service\nbalanceador", GREY)
     box(ax, 7.6, 1.6, 3.6, 3.0, "API FastAPI\n/predict  /interpret  /ask\n/experiments  /optimize\n/health  /ready  /metrics", BLUE, True)
     box(ax, 12.2, 3.9, 3.6, 1.5, "Contexto numérico\nprobabilidade · limiar ·\nfatores locais (oclusão)", ORANGE)
     box(ax, 12.2, 1.9, 3.6, 1.5, "Prompt engineering\npersona · regras · JSON\nfew-shot · autoverificação", ORANGE)
-    box(ax, 16.8, 3.9, 4.6, 1.5, "LLM pré-treinada\nLLaMA 3 (Groq/Ollama) · GPT · Claude", ORANGE, True)
+    box(ax, 16.8, 3.9, 4.6, 1.5, "LLM pré-treinada\nGPT-OSS (Groq) · LLaMA · Claude", ORANGE, True)
     box(ax, 16.8, 1.9, 4.6, 1.5, "Validação JSON + aviso clínico\nfalhou → fallback offline", ORANGE)
     box(ax, 7.6, 0.4, 3.6, 0.95, "Prometheus → Grafana\nlogs JSON (request_id)", PURPLE)
     box(ax, 4.2, 0.4, 2.6, 1.2, "HPA 2–10 réplicas\nCPU 70% · mem 80%", PURPLE)

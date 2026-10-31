@@ -19,7 +19,7 @@ flowchart LR
         MOD --> API[/predict · /interpret · /ask<br/>/experiments · /optimize/]
         API --> X[Contexto numérico<br/>probabilidade · limiar · fatores locais]
         X --> P[Prompt engineering<br/>persona · regras · JSON · few-shot]
-        P --> LLM{{LLM<br/>LLaMA via Groq/Ollama · GPT · Claude}}
+        P --> LLM{{LLM<br/>GPT-OSS via Groq · LLaMA via Ollama · Claude}}
         LLM --> V[Validação JSON<br/>+ aviso clínico]
         V -->|falha| FB[Fallback offline<br/>template]
         API --> PM[/metrics Prometheus/]
@@ -64,7 +64,7 @@ flowchart LR
 
 **7. LLM ancorada em números (grounding).** A LLM não acessa o modelo: recebe um JSON com probabilidade, limiar, fatores locais (com médias de benignos e malignos) e o desempenho do modelo no teste. As regras do prompt proíbem inventar números e usar linguagem de diagnóstico definitivo, e a avaliação automática verifica as duas coisas.
 
-**8. Provedor de LLM plugável e com fallback.** Uma interface única atende APIs compatíveis com OpenAI (GPT, LLaMA via Groq ou Ollama local, LM Studio) e a API da Anthropic. Se a LLM falhar ou responder fora do formato, a API devolve uma explicação por template (offline) e registra o evento na métrica `llm_requests_total{status="fallback"}` — o médico nunca fica sem resposta.
+**8. Provedor de LLM plugável e com fallback.** Uma interface única atende APIs compatíveis com OpenAI (GPT-OSS 120B via Groq — o padrão —, LLaMA via Ollama local, GPT, LM Studio) e a API da Anthropic. Se a LLM falhar ou responder fora do formato, a API devolve uma explicação por template (offline) e registra o evento na métrica `llm_requests_total{status="fallback"}` — o médico nunca fica sem resposta.
 
 **9. Escalabilidade.** A API é sem estado (o modelo é carregado de arquivo na inicialização), então escala horizontalmente: no Docker Compose com `--scale api=N` atrás do nginx; no Kubernetes com HPA de 2 a 10 réplicas por CPU/memória, sondas de prontidão e `PodDisruptionBudget`. A otimização pesada não roda dentro da API em produção: vai para um `Job` indexado (um pod por modelo). A rota `/optimize` existe para demonstração e roda no máximo um job por réplica.
 

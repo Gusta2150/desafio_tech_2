@@ -12,10 +12,10 @@ Angular 16, componentes **standalone**, gráficos com **ng2-charts/Chart.js**.
 Pré-requisito: a API rodando em `http://localhost:8000` (ver `src/environments/environment.ts`).
 
 ```bash
-# na pasta tech-challenge-fase2/
+# na raiz do projeto
 uvicorn src.api.main:app --port 8000
 
-# em outro terminal, na pasta tech-challenge-fase2/frontend/
+# em outro terminal, na pasta frontend/
 npm install --legacy-peer-deps   # ng2-charts declara uma peer dep que conflita com Angular 16
 npm start                        # porta 4201, para não conflitar com a Fase 1 (4200)
 ```

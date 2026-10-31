@@ -48,14 +48,15 @@ Detalhes, 5 experimentos por modelo e a comparação com busca aleatória em
 | Avaliação da qualidade das interpretações | `src/llm/evaluation.py`, `scripts/evaluate_llm.py` |
 | Ambiente virtual | `pyproject.toml` (Poetry) ou `requirements.txt` (venv) |
 | Testes automatizados | `tests/` (pytest) |
-| Notebook/scripts de demonstração | `notebooks/02_demo_fase2.ipynb`, `scripts/demo.py` |
+| Notebook/scripts de demonstração | `notebooks/02_demo_fase2.ipynb` (passo a passo, com as chamadas e os retornos), `scripts/demo.py` |
+| Aplicação web (demonstração integrada) | `frontend/` (Angular): AG ao vivo, jornada do médico, inspetor e avaliação da LLM |
 | Relatório técnico | `reports/relatorio_tecnico_fase2.pdf` (e `.md`) |
 | Roteiro do vídeo | `reports/roteiro_video_fase2.md` |
 
 ## Estrutura
 
 ```text
-tech-challenge-fase2/
+desafio_tech_2/
 ├── configs/experiments.yaml     # configurações do AG e da fitness
 ├── data/data.csv                # mesmo dataset da Fase 1
 ├── deploy/                      # nginx, Prometheus, Grafana, Kubernetes (HPA + Job)
@@ -82,7 +83,8 @@ tech-challenge-fase2/
 ## Como executar
 
 ```bash
-cd tech-challenge-fase2
+git clone https://github.com/Gusta2150/desafio_tech_2.git
+cd desafio_tech_2
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt    # ou: poetry install
@@ -153,7 +155,7 @@ uvicorn src.api.main:app --port 8000      # documentação em http://localhost:8
 Interface Angular em [`frontend/`](frontend/README.md), no mesmo estilo visual do frontend da Fase 1. Dois terminais:
 
 ```bash
-uvicorn src.api.main:app --port 8000          # nesta pasta (tech-challenge-fase2/)
+uvicorn src.api.main:app --port 8000          # na raiz do projeto
 
 cd frontend
 npm install --legacy-peer-deps                # só na primeira vez

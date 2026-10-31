@@ -25,7 +25,7 @@ OUT_MD = PROJECT_DIR / "reports" / "relatorio_tecnico_fase2.md"
 OUT_PDF = PROJECT_DIR / "reports" / "relatorio_tecnico_fase2.pdf"
 
 TEAM = [("Gabriel Wesley", "RM376899"), ("Gustavo Leite", "RM375733"), ("Luiz Fellipe", "RM376854")]
-REPO = "https://github.com/Gusta2150/desafio_tech"
+REPO = "https://github.com/Gusta2150/desafio_tech_2"
 MODEL_PT = {"logistic_regression": "Regressão Logística", "random_forest": "Random Forest"}
 
 
@@ -327,8 +327,12 @@ def build(res: dict, llm: dict | None, llm_is_real: bool) -> list[tuple]:
         "falsos negativos etc.) em impacto clínico para a equipe.",
         "<b>Perguntas livres</b> (/ask): o(a) médico(a) pergunta em linguagem natural sobre o caso — base para a "
         "integração com dados textuais do Módulo 3.",
-        "<b>Provedores plugáveis</b>: qualquer API compatível com OpenAI (LLaMA 3 via Groq ou Ollama local, GPT, "
-        "LM Studio) e a API da Anthropic, configurados por variáveis de ambiente.",
+        "<b>Provedores plugáveis</b>: qualquer API compatível com OpenAI (GPT-OSS 120B via Groq, LLaMA via Ollama "
+        "local, GPT, LM Studio) e a API da Anthropic, configurados por variáveis de ambiente. O padrão é o Groq com "
+        "openai/gpt-oss-120b (o Groq descontinuou o LLaMA 3.3 70B); como é um modelo de raciocínio, usa "
+        "reasoning_effort=low para o raciocínio não consumir os tokens da resposta JSON.",
+        "<b>Limite de taxa</b>: respostas 429 e erros temporários são repetidos respeitando o Retry-After da API; "
+        "uma avaliação com falhas de API é salva à parte e nunca entra neste relatório.",
         "<b>Fallback</b>: se a LLM falha ou responde fora do formato, a API devolve uma explicação por template e "
         "registra o evento na métrica llm_requests_total{status=\"fallback\"}."])
 
@@ -389,6 +393,14 @@ def build(res: dict, llm: dict | None, llm_is_real: bool) -> list[tuple]:
         if perf.get("text"):
             p("Exemplo de insights de desempenho para a equipe clínica (/report/performance):")
             B.append(("code", perf["text"]))
+            # O texto acima é a resposta da LLM sem edição; a conferência abaixo vem dos dados.
+            mal = ds["test_malignant"]
+            p(f"<b>Conferência (calculada dos resultados, não pela LLM):</b> no teste, o modelo original detecta "
+              f"{mal - base_sel['false_negatives']} de {mal} casos malignos e o otimizado, "
+              f"{mal - opt_sel['false_negatives']} de {mal}; falsos positivos {base_sel['false_positives']} → "
+              f"{opt_sel['false_positives']}. Contagens derivadas que a LLM escreve (\"x de y casos\") precisam de "
+              "revisão humana: o critério de fidelidade só verifica se cada número existe no contexto, não se a conta "
+              "está certa.")
 
     # ---------------- Escalabilidade
     h1("8. Arquitetura, escalabilidade e monitoramento")
@@ -407,6 +419,10 @@ def build(res: dict, llm: dict | None, llm_is_real: bool) -> list[tuple]:
         "<b>Logging</b>: logs JSON estruturados com request_id propagado (cabeçalho x-request-id).",
         "<b>Rastreamento de experimentos</b>: cada execução do AG grava parâmetros, métricas por geração e resultado "
         "em reports/runs/ e, se MLFLOW_TRACKING_URI estiver definida, também no MLflow.",
+        "<b>Aplicação web</b> (frontend/, Angular): mostra a convergência do AG e uma execução ao vivo, a jornada do "
+        "médico (paciente, previsão, explicação, pergunta livre), um inspetor com tudo o que entra e sai da LLM "
+        "(prompts, contexto, resposta bruta, notas, juiz, tokens) e a avaliação salva. Um seletor offline/groq "
+        "permite navegar sem gastar a cota; a chave da LLM fica só no servidor.",
         "A implantação em nuvem é opcional no enunciado; os manifestos Kubernetes funcionam em qualquer cluster "
         "gerenciado (EKS, GKE, AKS)."])
 
@@ -421,7 +437,11 @@ def build(res: dict, llm: dict | None, llm_is_real: bool) -> list[tuple]:
         "dados (split idêntico à Fase 1), modelos, limiar e fitness (inclusive o reaproveitamento sem re-treino);",
         "LLM: contexto, prompts, extração de JSON, fallback, e os critérios de avaliação (números inventados, "
         "linguagem proibida, cobertura e coerência);",
-        "API: health/ready, previsão, validação de entrada, interpretação, perguntas, métricas e job do AG."])
+        "API: health/ready, previsão, validação de entrada, interpretação, perguntas, métricas e job do AG;",
+        "rotas da aplicação web (pacientes, inspeção da LLM, avaliações, convergência) e o contrato das rotas "
+        "antigas (sem resposta bruta nem prompts);",
+        "provedores: novas tentativas em 429/timeout, erro imediato sem chave, leitura do .env e modelos de "
+        "raciocínio com esforço baixo."])
 
     # ---------------- Desafios
     h1("10. Desafios enfrentados e soluções")
@@ -448,17 +468,19 @@ def build(res: dict, llm: dict | None, llm_is_real: bool) -> list[tuple]:
         "Explicações locais por oclusão não tratam a correlação entre atributos (ex.: raio, perímetro e área).",
         "Próximos passos (Módulo 3): ampliar o espaço de busca (seleção de atributos, outros algoritmos), "
         "otimização multiobjetivo (NSGA-II) para a fronteira recall × falsos positivos, integrar laudos textuais "
-        "ao contexto da LLM e expor as explicações no frontend Angular da Fase 1."])
+        "ao contexto da LLM e levar as explicações para o fluxo de atendimento (a aplicação web desta fase é uma "
+        "ferramenta de demonstração e conferência, não um produto clínico)."])
 
     h1("12. Como reproduzir")
-    B.append(("code", "cd tech-challenge-fase2\n"
+    B.append(("code", f"git clone {REPO}.git && cd {REPO.rsplit('/', 1)[-1]}\n"
               "python -m venv .venv && source .venv/bin/activate   # Windows: .venv\\Scripts\\activate\n"
               "pip install -r requirements.txt                     # ou: poetry install\n"
               "python -m scripts.run_experiments                   # AG: todos os experimentos\n"
               "python -m scripts.evaluate_llm --provider groq      # avaliação da LLM (GROQ_API_KEY no .env)\n"
               "python -m scripts.make_figures && python -m scripts.generate_report\n"
               "pytest                                              # testes\n"
-              "uvicorn src.api.main:app --port 8000                # API em http://localhost:8000/docs"))
+              "uvicorn src.api.main:app --port 8000                # API em http://localhost:8000/docs\n"
+              "cd frontend && npm install --legacy-peer-deps && npm start   # app web em http://localhost:4201"))
     p(f"Repositório: {REPO}")
     return B
 
