@@ -51,6 +51,12 @@ class Interpretation:
     # "api" = a LLM não respondeu (rede, chave, limite de taxa);
     # "formato" = respondeu, mas fora do JSON esperado.
     error_kind: str | None = None
+    # O que foi enviado à LLM e o consumo de tokens — para inspeção (``/llm/inspect``);
+    # as rotas /interpret e /ask não devolvem esses campos.
+    prompt_system: str = field(default="", repr=False)
+    prompt_user: str = field(default="", repr=False)
+    json_mode: bool = False
+    usage: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -105,6 +111,12 @@ class DiagnosisInterpreter:
     # ------------------------------------------------------------------ #
     def _call(self, system: str, user: str, json_mode: bool, context: dict[str, Any],
               fields: list[str], strategy: str) -> Interpretation:
+        out = self._generate(system, user, json_mode, context, fields, strategy)
+        out.prompt_system, out.prompt_user, out.json_mode = system, user, json_mode
+        return out
+
+    def _generate(self, system: str, user: str, json_mode: bool, context: dict[str, Any],
+                  fields: list[str], strategy: str) -> Interpretation:
         start = time.perf_counter()
         try:
             resp = self.provider.generate(system, user, temperature=self.temperature, json_mode=json_mode,
@@ -117,7 +129,7 @@ class DiagnosisInterpreter:
                 structured["aviso"] = DISCLAIMER
             text = render_text(structured) if structured else resp.text
             return Interpretation(structured, text, context, resp.provider, resp.model, strategy, PROMPT_VERSION,
-                                  resp.latency_s, valid, raw=resp.text)
+                                  resp.latency_s, valid, raw=resp.text, usage=resp.usage)
         except LLMError as exc:
             kind = "api" if isinstance(exc, LLMAPIError) else "formato"
             logger.warning("LLM falhou (%s, %s): %s", self.provider.name, kind, exc)
@@ -159,12 +171,14 @@ class DiagnosisInterpreter:
         except LLMError as exc:
             kind = "api" if isinstance(exc, LLMAPIError) else "formato"
             return Interpretation(None, "", context, self.provider.name, self.provider.model, "ask",
-                                  PROMPT_VERSION, 0.0, False, error=str(exc), error_kind=kind)
+                                  PROMPT_VERSION, 0.0, False, error=str(exc), error_kind=kind,
+                                  prompt_system=SYSTEM_CLINICAL, prompt_user=user, json_mode=True)
         if "resumo" in structured and "resposta" not in structured:  # provedor offline
             structured = {"resposta": structured["resumo"], "aviso": structured.get("aviso", DISCLAIMER)}
         structured.setdefault("aviso", DISCLAIMER)
         return Interpretation(structured, render_text(structured), context, resp.provider, resp.model, "ask",
-                              PROMPT_VERSION, resp.latency_s, True, raw=resp.text)
+                              PROMPT_VERSION, resp.latency_s, True, raw=resp.text, usage=resp.usage,
+                              prompt_system=SYSTEM_CLINICAL, prompt_user=user, json_mode=True)
 
 
 def performance_context(results: dict[str, Any]) -> dict[str, Any]:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +32,7 @@ from src.experiments import RESULTS_DIR, bootstrap_baseline_model
 from src.fitness import CVFitness
 from src.ga import GAConfig, GeneticAlgorithm
 from src.llm import DiagnosisInterpreter, LLMError, get_provider
+from src.llm.evaluation import evaluate_interpretation, llm_judge
 from src.models import BASELINE_PARAMS, MODEL_NAMES
 from src.monitoring import log_event, request_id_var, setup_logging
 from src.spaces import SPACES
@@ -40,12 +42,18 @@ load_env()  # .env da raiz do projeto (não sobrescreve variáveis já definidas
 logger = logging.getLogger("api")
 MODELS_DIR = PROJECT_DIR / "models"
 DISCLAIMER = "Resultado de apoio à triagem. Não confirma nem descarta câncer e não substitui a avaliação médica."
+STRATEGIES = ["basico", "estruturado", "few_shot"]
+# Campos internos da Interpretation que só /llm/inspect devolve.
+PRIVATE_FIELDS = {"raw", "prompt_system", "prompt_user", "json_mode", "usage"}
+# "Perto do limiar" no filtro de /samples: |probabilidade - limiar| <= este valor.
+NEAR_THRESHOLD = 0.15
 
 
 class State:
     model: Any = None
     card: dict[str, Any] = {}
     jobs: dict[str, dict[str, Any]] = {}
+    samples: list[dict[str, Any]] | None = None
     executor = ThreadPoolExecutor(max_workers=1)  # 1 otimização por réplica; escala via réplicas/Jobs
 
 
@@ -64,6 +72,8 @@ def load_model() -> None:
 async def lifespan(_: FastAPI):
     setup_logging()
     load_model()
+    # novo a cada inicialização: o anterior pode ter sido desligado (ex.: vários TestClient no mesmo processo)
+    State.executor = ThreadPoolExecutor(max_workers=1)
     yield
     State.executor.shutdown(wait=False, cancel_futures=True)
 
@@ -116,6 +126,16 @@ class InterpretRequest(BaseModel):
     provider: str | None = Field(None, description="offline | groq | ollama | openai | anthropic")
 
 
+class InspectRequest(InterpretRequest):
+    juiz: bool = Field(False, description="Pede notas ao LLM juiz (mesmo provedor; 1 chamada a mais)")
+
+
+class CompareRequest(BaseModel):
+    amostra: dict[str, float]
+    provider: str | None = Field(None, description="offline | groq | ollama | openai | anthropic")
+    juiz: bool = False
+
+
 class AskRequest(BaseModel):
     amostra: dict[str, float]
     pergunta: str = Field(..., min_length=3, max_length=500)
@@ -157,6 +177,10 @@ def _track_llm(result) -> None:
     status = "fallback" if result.used_fallback else ("ok" if not result.error else "erro")
     M.LLM_REQUESTS.labels(result.provider, status).inc()
     M.LLM_LATENCY.labels(result.provider).observe(result.latency_s)
+
+
+def _public(result) -> dict[str, Any]:
+    return {k: v for k, v in result.to_dict().items() if k not in PRIVATE_FIELDS}
 
 
 # ---------------------------------------------------------------------- #
@@ -206,14 +230,14 @@ def predict(req: PredictRequest) -> dict[str, Any]:
 def interpret(req: InterpretRequest) -> dict[str, Any]:
     result = _interpreter(req.provider).explain_case(_frame([req.amostra]), strategy=req.estrategia)
     _track_llm(result)
-    return {k: v for k, v in result.to_dict().items() if k != "raw"}
+    return _public(result)
 
 
 @app.post("/ask", tags=["llm"])
 def ask(req: AskRequest) -> dict[str, Any]:
     result = _interpreter(req.provider).ask(_frame([req.amostra]), req.pergunta)
     _track_llm(result)
-    return {k: v for k, v in result.to_dict().items() if k != "raw"}
+    return _public(result)
 
 
 @app.get("/experiments", tags=["algoritmo genético"])
@@ -241,7 +265,146 @@ def performance_report(provider: str | None = None) -> dict[str, Any]:
         raise HTTPException(404, "Execute `python -m scripts.run_experiments` primeiro.")
     result = _interpreter(provider).explain_performance(json.loads(path.read_text(encoding="utf-8")))
     _track_llm(result)
-    return {k: v for k, v in result.to_dict().items() if k != "raw"}
+    return _public(result)
+
+
+# ---------------------------------------------------------------------- #
+# Pacientes do teste, inspeção da LLM e resultados salvos                  #
+# ---------------------------------------------------------------------- #
+def _sample_rows() -> list[dict[str, Any]]:
+    if State.samples is None:
+        data = load_split()
+        X = data.X_test.loc[:, State.card["features"]]
+        proba = State.model.predict_proba(X)[:, 1]
+        threshold = float(State.model.threshold)
+        rows = []
+        for (idx, row), p, y in zip(X.iterrows(), proba, data.y_test):
+            alert = bool(p >= threshold)
+            rows.append({"indice": int(idx), "diagnostico_real": "M" if int(y) == 1 else "B",
+                         "probabilidade": round(float(p), 4), "limiar": round(threshold, 2), "alerta": alert,
+                         "acertou": alert == (int(y) == 1), "distancia_limiar": round(abs(float(p) - threshold), 4),
+                         "medidas": {k: float(v) for k, v in row.items()}})
+        # erros primeiro; depois os casos mais próximos do limiar (os mais "difíceis")
+        rows.sort(key=lambda r: (r["acertou"], r["distancia_limiar"]))
+        State.samples = rows
+    return State.samples
+
+
+SAMPLE_FILTERS = {
+    "erros": lambda r: not r["acertou"],
+    "limiar": lambda r: r["distancia_limiar"] <= NEAR_THRESHOLD,
+    "malignos": lambda r: r["diagnostico_real"] == "M",
+    "benignos": lambda r: r["diagnostico_real"] == "B",
+}
+
+
+@app.get("/samples", tags=["modelo"])
+def samples(filtro: Literal["erros", "limiar", "malignos", "benignos"] | None = None) -> dict[str, Any]:
+    """Pacientes do teste com a previsão do modelo em produção (erros e casos perto do limiar primeiro)."""
+    rows = _sample_rows()
+    if filtro:
+        rows = [r for r in rows if SAMPLE_FILTERS[filtro](r)]
+    return {"limiar": round(float(State.model.threshold), 2), "perto_do_limiar": NEAR_THRESHOLD, "filtro": filtro,
+            "total": len(rows), "amostras": rows, "aviso": DISCLAIMER}
+
+
+def _inspect(interp: DiagnosisInterpreter, sample: pd.DataFrame, strategy: str, judge: bool) -> dict[str, Any]:
+    result = interp.explain_case(sample, strategy=strategy)
+    _track_llm(result)
+    if not judge:
+        judge_out, judge_status = None, "nao_pedido"
+    elif interp.provider.name == "offline":
+        judge_out, judge_status = None, "indisponivel_offline"
+    else:
+        judge_out = llm_judge(interp.provider, result)
+        judge_status = "ok" if judge_out else "falhou"
+    return {
+        "estrategia": strategy, "provider": result.provider, "model": result.model,
+        "provider_solicitado": interp.provider.name, "prompt_version": result.prompt_version,
+        "prompt_system": result.prompt_system, "prompt_user": result.prompt_user, "json_mode": result.json_mode,
+        "contexto": result.context, "resposta_bruta": result.raw, "estruturado": result.structured,
+        "texto": result.text, "valid_json": result.valid_json,
+        "notas": evaluate_interpretation(result), "juiz": judge_out, "juiz_status": judge_status,
+        "latencia_s": result.latency_s, "usage": result.usage, "used_fallback": result.used_fallback,
+        "error": result.error, "error_kind": result.error_kind, "aviso": DISCLAIMER,
+    }
+
+
+@app.post("/llm/inspect", tags=["debug"])
+def llm_inspect(req: InspectRequest) -> dict[str, Any]:
+    """Tudo o que entra e sai da LLM numa interpretação: prompts, contexto, resposta bruta, notas e tokens."""
+    return _inspect(_interpreter(req.provider), _frame([req.amostra]), req.estrategia, req.juiz)
+
+
+@app.post("/llm/compare", tags=["debug"])
+def llm_compare(req: CompareRequest) -> list[dict[str, Any]]:
+    """A mesma paciente nas 3 estratégias de prompt, em sequência (respeita o limite de taxa do provedor)."""
+    interp, sample = _interpreter(req.provider), _frame([req.amostra])
+    return [_inspect(interp, sample, strategy, req.juiz) for strategy in STRATEGIES]
+
+
+_EVAL_FILE = re.compile(r"^llm_evaluation_([a-z0-9_-]+)[.]json$")
+
+
+@app.get("/llm/evaluations", tags=["llm"])
+def llm_evaluations() -> list[dict[str, Any]]:
+    """Avaliações salvas por ``scripts.evaluate_llm`` (a pasta ``incompleto/`` fica de fora)."""
+    out = []
+    for path in sorted(RESULTS_DIR.glob("llm_evaluation_*.json")):
+        match = _EVAL_FILE.match(path.name)
+        if not match:
+            continue
+        res = json.loads(path.read_text(encoding="utf-8"))
+        falhas = res.get("falhas", {})
+        out.append({"provider": match.group(1), "model": res.get("model"), "judge": res.get("judge"),
+                    "judge_model": res.get("judge_model"), "cases": res.get("cases"),
+                    "estrategias": list(res.get("summary", {})), "falhas": falhas,
+                    "total_falhas": sum(falhas.values()), "arquivo": path.name})
+    return out
+
+
+@app.get("/llm/evaluations/{provider}", tags=["llm"])
+def llm_evaluation(provider: str) -> dict[str, Any]:
+    path = RESULTS_DIR / f"llm_evaluation_{provider}.json"
+    if not re.fullmatch(r"[a-z0-9_-]+", provider) or not path.exists():
+        raise HTTPException(404, f"Avaliação '{provider}' não encontrada. Rode `python -m scripts.evaluate_llm`.")
+    res = json.loads(path.read_text(encoding="utf-8"))
+    return {"provider": provider, "model": res.get("model"), "judge": res.get("judge"),
+            "judge_model": res.get("judge_model"), "cases": res.get("cases"), "falhas": res.get("falhas", {}),
+            "resumo": res.get("summary", {}), "linhas": res.get("rows", []), "exemplos": res.get("examples", []),
+            "relatorio_desempenho": res.get("performance_report")}
+
+
+@app.get("/experiments/history", tags=["algoritmo genético"])
+def experiments_history() -> dict[str, Any]:
+    """Convergência por geração de cada experimento e a curva da busca aleatória com o mesmo orçamento."""
+    path = RESULTS_DIR / "experiments.json"
+    if not path.exists():
+        raise HTTPException(404, "Execute `python -m scripts.run_experiments` primeiro.")
+    res = json.loads(path.read_text(encoding="utf-8"))
+    out = {}
+    for model, r in res["models"].items():
+        exps = {}
+        for name, rec in r["experiments"].items():
+            exps[name] = {
+                "descricao": rec.get("description"), "config": rec.get("config"),
+                "cv_fitness": rec["cv_fitness"], "avaliacoes": rec.get("evaluations"),
+                "parada_antecipada": rec.get("stopped_early"),
+                "historico": [{"geracao": h["generation"], "melhor": h["best_fitness"], "media": h["mean_fitness"],
+                               "diversidade": h["diversity"], "avaliacoes": h["evaluations"]}
+                              for h in rec.get("history", [])],
+            }
+        rs = r.get("random_search")
+        out[model] = {
+            "display_name": r.get("display_name"), "baseline_cv_fitness": r["baseline"]["cv_fitness"],
+            "experimentos": exps,
+            "busca_aleatoria": None if not rs else {
+                "orcamento": rs["budget"], "experimento_referencia": rs["reference_experiment"],
+                "cv_fitness": rs["cv_fitness"],
+                "curva": [{"avaliacoes": i + 1, "melhor": v} for i, v in enumerate(rs["curve"])],
+            },
+        }
+    return {"selecionado": res["selected"], "modelos": out}
 
 
 def _run_job(job_id: str, req: OptimizeRequest) -> None:
@@ -254,9 +417,14 @@ def _run_job(job_id: str, req: OptimizeRequest) -> None:
                        mutation_rate=req.mutation_rate, crossover_rate=req.crossover_rate,
                        selection=req.selection, crossover=req.crossover, mutation=req.mutation, seed=req.seed)
 
+        job["historico"] = []
+
         def progress(stats):
             job["progress"] = {"geracao": stats.generation, "total": req.generations,
                                "melhor_fitness": round(stats.best_fitness, 4)}
+            job["historico"].append({"geracao": stats.generation, "melhor": stats.best_fitness,
+                                     "media": stats.mean_fitness, "diversidade": stats.diversity,
+                                     "avaliacoes": stats.evaluations})
 
         result = GeneticAlgorithm(SPACES[req.modelo], fitness, cfg, on_generation=progress).run()
         baseline_score, _ = fitness(BASELINE_PARAMS[req.modelo])
