@@ -8,6 +8,10 @@ Projeto educacional que continua a Fase 1: os modelos de classificação de cân
 - Gustavo Leite — RM375733
 - Luiz Fellipe — RM376854
 
+## Vídeo de apresentação
+
+https://youtu.be/tcyct9YdUrg
+
 ---
 
 ## Visão geral
@@ -369,6 +373,7 @@ desafio_tech_2/
 | Aplicação web | `frontend/` |
 | Relatório técnico | `reports/relatorio_tecnico_fase2.pdf` |
 | Roteiro do vídeo | `reports/roteiro_video_fase2.pdf` |
+| Vídeo de apresentação | https://youtu.be/tcyct9YdUrg |
 
 ---
 
